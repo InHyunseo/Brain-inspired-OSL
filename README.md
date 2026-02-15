@@ -1,4 +1,4 @@
-# OdorHold DRQN Project
+# Odor Source Localization Project
 
 `main.py` 하나로 DRQN 학습, 평가, 시각화(PNG/GIF)를 순차 실행하는 프로젝트입니다.
 
