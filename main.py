@@ -43,6 +43,12 @@ def main():
     # [Eval/Plot 관련]
     parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes for evaluation")
     parser.add_argument("--seed-base", type=int, default=20000)
+    parser.add_argument(
+        "--save-gif",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save rollout GIF during evaluation (default: True)",
+    )
 
     args = parser.parse_args()
 

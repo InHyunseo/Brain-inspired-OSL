@@ -92,7 +92,7 @@ def evaluate(args):
 
     # --- GIF Generation (Here!) ---
     if args.save_gif:
-        print(f"[Info] Generating GIF with best model...")
+        print(f"[Info] Generating GIF with model: {ckpt_name}")
         # 중요: render_mode="rgb_array"로 환경 다시 생성
         env_gif = OdorHoldEnv(render_mode="rgb_array", **env_kwargs)
         
@@ -126,8 +126,12 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--seed-base", type=int, default=20000)
     parser.add_argument("--force-cpu", action="store_true")
-    # GIF 옵션 추가 (기본 True)
-    parser.add_argument("--save-gif", action="store_true", default=True, help="Save GIF animation")
+    parser.add_argument(
+        "--save-gif",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save rollout GIF (default: True)",
+    )
 
     args = parser.parse_args()
     evaluate(args)
