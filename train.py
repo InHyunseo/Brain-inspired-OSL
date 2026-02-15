@@ -38,13 +38,7 @@ def train(args):
         json.dump(vars(args), f, indent=2)
 
     # 2. Init
-    env = make_env(
-        args.env_id,
-        src_x=args.src_x,
-        src_y=args.src_y,
-        wind_x=args.wind_x,
-        sigma_c=args.sigma_c,
-    )
+    env = make_env(args.env_id, src_x=args.src_x, src_y=args.src_y, wind_x=args.wind_x)
     agent = DRQNAgent(env.observation_space.shape[0], env.action_space.n, device, 
                       rnn_hidden=args.rnn_hidden, lr=args.lr)
     buffer = EpisodeReplayBuffer(args.buffer_size)
@@ -131,7 +125,6 @@ if __name__ == "__main__":
     p.add_argument("--src-x", type=float, default=0.0)
     p.add_argument("--src-y", type=float, default=0.0)
     p.add_argument("--wind-x", type=float, default=1.0)
-    p.add_argument("--sigma-c", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
     
     # Hyperparams

@@ -117,10 +117,7 @@ def evaluate(args):
         env_gif.close()
         
         gif_path = os.path.join(args.run_dir, "best_agent.gif")
-        if frames:
-            plotter.save_gif(frames, gif_path, fps=30)
-        else:
-            print("[Warn] GIF skipped: no render frames were produced.")
+        plotter.save_gif(frames, gif_path, fps=30)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

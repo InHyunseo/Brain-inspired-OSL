@@ -56,7 +56,6 @@ python3 eval.py --run-dir runs/drqn_main_YYYYMMDD_HHMMSS --episodes 20 --save-gi
 - `--seq-len` (default: `16`)
 - `--src-x`, `--src-y` (default: `0.0`, `0.0`)
 - `--wind-x` (default: `0.0`)
-- `--sigma-c` (default: `1.0`)
 - `--eval-episodes` (default: `10`)
 - `--force-cpu`
 
