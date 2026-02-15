@@ -74,6 +74,7 @@ class OdorHoldEnv(gym.Env):
         self._render_scan_idx = 0
         self._heatmap_img = None
         self._cbar_img = None
+        self._trail = []
 
     def _conc(self, x, y):
         # ... (기존 _conc 로직 유지) ...
@@ -118,6 +119,43 @@ class OdorHoldEnv(gym.Env):
     def _get_obs(self):
         return self._obs_buf.reshape(-1).copy()
 
+    def _world_to_px(self, x, y):
+        size = self._img_size - 1
+        px = int(np.clip((float(x) + self.L) / (2.0 * self.L) * size, 0, size))
+        py = int(np.clip((self.L - float(y)) / (2.0 * self.L) * size, 0, size))
+        return px, py
+
+    def _draw_disk(self, img, cx, cy, radius, color):
+        h, w = img.shape[:2]
+        x0 = max(0, cx - radius)
+        x1 = min(w - 1, cx + radius)
+        y0 = max(0, cy - radius)
+        y1 = min(h - 1, cy + radius)
+        if x0 > x1 or y0 > y1:
+            return
+        yy, xx = np.ogrid[y0:y1 + 1, x0:x1 + 1]
+        mask = (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= radius * radius
+        patch = img[y0:y1 + 1, x0:x1 + 1]
+        patch[mask] = color
+
+    def _draw_line(self, img, x0, y0, x1, y1, color):
+        n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+        xs = np.clip(np.round(np.linspace(x0, x1, n)).astype(np.int32), 0, img.shape[1] - 1)
+        ys = np.clip(np.round(np.linspace(y0, y1, n)).astype(np.int32), 0, img.shape[0] - 1)
+        img[ys, xs] = color
+
+    def _build_heatmap(self):
+        size = self._img_size
+        xs = np.linspace(-self.L, self.L, size, dtype=np.float32)
+        ys = np.linspace(self.L, -self.L, size, dtype=np.float32)
+        X, Y = np.meshgrid(xs, ys)
+        c = self._conc(X, Y).astype(np.float32)
+
+        r = np.clip(4.0 * c - 1.5, 0.0, 1.0)
+        g = np.clip(4.0 * c - 2.5, 0.0, 1.0)
+        b = np.clip(4.0 * c - 3.5, 0.0, 1.0)
+        return (np.stack([r, g, b], axis=-1) * 255.0).astype(np.uint8)
+
     def reset(self, seed=None, options=None):
         if seed is not None:
             self.np_random = np.random.default_rng(seed)
@@ -140,6 +178,7 @@ class OdorHoldEnv(gym.Env):
         self.cast_phase = 0
         self.need_turn = False
         self._scan_c[:] = 0.0
+        self._trail = [(self.x, self.y)]
         
         # Init Obs
         c0 = self._sense(0.0)
@@ -228,12 +267,52 @@ class OdorHoldEnv(gym.Env):
             "d": d, "c": float(c), "mode": mode, "in_goal": int(d < self.r_goal),
             "src_x": self.src_x, "src_y": self.src_y
         }
+        self._trail.append((self.x, self.y))
         return self._get_obs(), r, terminated, truncated, info
 
     def render(self):
-        # ... (렌더링 코드는 길어서 생략하나 필요 시 기존 코드의 render 메소드를 그대로 사용하세요)
-        # 중요: 서버 환경에서는 render 사용 시 주의
-        return None 
+        if self.render_mode not in (None, "rgb_array"):
+            return None
+        if self._heatmap_img is None:
+            self._heatmap_img = self._build_heatmap()
+
+        frame = self._heatmap_img.copy()
+
+        # Border
+        frame[0, :, :] = 255
+        frame[-1, :, :] = 255
+        frame[:, 0, :] = 255
+        frame[:, -1, :] = 255
+
+        # Goal + source
+        src_px, src_py = self._world_to_px(self.src_x, self.src_y)
+        goal_r = max(1, int(round(self.r_goal / (2.0 * self.L) * (self._img_size - 1))))
+        for t in np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False):
+            gx = int(round(src_px + goal_r * np.cos(t)))
+            gy = int(round(src_py + goal_r * np.sin(t)))
+            if 0 <= gx < self._img_size and 0 <= gy < self._img_size:
+                frame[gy, gx] = np.array([210, 210, 210], dtype=np.uint8)
+        self._draw_disk(frame, src_px, src_py, 3, np.array([255, 255, 255], dtype=np.uint8))
+
+        # Trail
+        for tx, ty in self._trail[::2]:
+            px, py = self._world_to_px(tx, ty)
+            self._draw_disk(frame, px, py, 1, np.array([80, 220, 255], dtype=np.uint8))
+
+        # Agent + heading
+        ax, ay = self._world_to_px(self.x, self.y)
+        self._draw_disk(frame, ax, ay, 3, np.array([0, 170, 255], dtype=np.uint8))
+        hx = self.x + 0.25 * np.cos(self.th)
+        hy = self.y + 0.25 * np.sin(self.th)
+        hpx, hpy = self._world_to_px(hx, hy)
+        self._draw_line(frame, ax, ay, hpx, hpy, np.array([0, 255, 255], dtype=np.uint8))
+
+        if self._sense_pt is not None:
+            sx, sy = self._world_to_px(self._sense_pt[0], self._sense_pt[1])
+            self._draw_disk(frame, sx, sy, 2, np.array([255, 60, 60], dtype=np.uint8))
+
+        return frame
     
     def close(self):
-        pass
+        self._heatmap_img = None
+        self._cbar_img = None

@@ -6,6 +6,7 @@ import torch
 
 from src.envs.odor_env import OdorHoldEnv
 from src.agents.drqn_agent import DRQNAgent
+from src.agents.dqn_agent import DQNAgent
 from src.utils import plotter
 
 def load_config(run_dir):
@@ -38,7 +39,23 @@ def evaluate(args):
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.n
 
-    agent = DRQNAgent(obs_dim, act_dim, device, rnn_hidden=conf.get('rnn_hidden', 147))
+    agent_type = conf.get("agent_type", "drqn")
+    if agent_type == "dqn":
+        agent = DQNAgent(
+            obs_dim,
+            act_dim,
+            device,
+            hidden=conf.get("dqn_hidden", 256),
+            lr=conf.get("lr", 1e-4),
+        )
+    else:
+        agent = DRQNAgent(
+            obs_dim,
+            act_dim,
+            device,
+            rnn_hidden=conf.get("rnn_hidden", 147),
+            lr=conf.get("lr", 1e-4),
+        )
 
     ckpt_name = args.ckpt
     if ckpt_name is None:
@@ -117,7 +134,10 @@ def evaluate(args):
         env_gif.close()
         
         gif_path = os.path.join(args.run_dir, "best_agent.gif")
-        plotter.save_gif(frames, gif_path, fps=30)
+        if frames:
+            plotter.save_gif(frames, gif_path, fps=30)
+        else:
+            print("[Warn] GIF skipped: no render frames were produced.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

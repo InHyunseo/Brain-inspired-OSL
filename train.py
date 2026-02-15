@@ -10,6 +10,7 @@ from gymnasium.envs.registration import register
 from src.envs.odor_env import OdorHoldEnv
 from src.utils.buffer import EpisodeReplayBuffer
 from src.agents.drqn_agent import DRQNAgent
+from src.agents.dqn_agent import DQNAgent
 from src.utils import plotter
 
 def make_env(env_id, **kwargs):
@@ -27,7 +28,7 @@ def ema(arr, alpha):
 
 def train(args):
     # 1. Setup
-    run_name = args.run_name or time.strftime("drqn_%Y%m%d_%H%M%S")
+    run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.out_dir, run_name)
     os.makedirs(os.path.join(run_dir, "checkpoints"), exist_ok=True)
     
@@ -38,9 +39,29 @@ def train(args):
         json.dump(vars(args), f, indent=2)
 
     # 2. Init
-    env = make_env(args.env_id, src_x=args.src_x, src_y=args.src_y, wind_x=args.wind_x)
-    agent = DRQNAgent(env.observation_space.shape[0], env.action_space.n, device, 
-                      rnn_hidden=args.rnn_hidden, lr=args.lr)
+    env = make_env(
+        args.env_id,
+        src_x=args.src_x,
+        src_y=args.src_y,
+        wind_x=args.wind_x,
+        sigma_c=args.sigma_c,
+    )
+    if args.agent_type == "dqn":
+        agent = DQNAgent(
+            env.observation_space.shape[0],
+            env.action_space.n,
+            device,
+            hidden=args.dqn_hidden,
+            lr=args.lr,
+        )
+    else:
+        agent = DRQNAgent(
+            env.observation_space.shape[0],
+            env.action_space.n,
+            device,
+            rnn_hidden=args.rnn_hidden,
+            lr=args.lr,
+        )
     buffer = EpisodeReplayBuffer(args.buffer_size)
 
     # 3. Training Loop
@@ -116,15 +137,18 @@ def train(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--env-id", default="OdorHold-v3")
+    p.add_argument("--agent-type", choices=["drqn", "dqn"], default="drqn")
     p.add_argument("--total-episodes", type=int, default=600)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--rnn-hidden", type=int, default=147)
+    p.add_argument("--dqn-hidden", type=int, default=256)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--out-dir", default="runs")
     p.add_argument("--run-name", default=None)
     p.add_argument("--src-x", type=float, default=0.0)
     p.add_argument("--src-y", type=float, default=0.0)
-    p.add_argument("--wind-x", type=float, default=1.0)
+    p.add_argument("--wind-x", type=float, default=0.0)
+    p.add_argument("--sigma-c", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
     
     # Hyperparams
@@ -138,4 +162,7 @@ if __name__ == "__main__":
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--force-cpu", action="store_true")
 
-    train(p.parse_args())
+    args = p.parse_args()
+    if args.run_name is None:
+        args.run_name = time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
+    train(args)

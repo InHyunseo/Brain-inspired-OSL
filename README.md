@@ -33,6 +33,11 @@ python3 main.py \
   --src-y 0.0
 ```
 
+예시 (DQN으로 학습):
+```bash
+python3 main.py --agent-type dqn --total-episodes 2000
+```
+
 ### 2. Train Only
 평가 없이 학습만 수행합니다.
 
@@ -44,18 +49,21 @@ python3 train.py --total-episodes 600 --out-dir runs --run-name my_run
 기존 run 결과를 불러와 성능 측정과 시각화를 다시 수행합니다.
 
 ```bash
-python3 eval.py --run-dir runs/drqn_main_YYYYMMDD_HHMMSS --episodes 20 --save-gif
+python3 eval.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --episodes 20 --save-gif
 ```
 
 ## Common Arguments
 `main.py` 기준 자주 쓰는 인자:
 - `--total-episodes` (default: `600`)
+- `--agent-type` (default: `drqn`, choices: `drqn`, `dqn`)
 - `--lr` (default: `1e-4`)
 - `--rnn-hidden` (default: `147`)
+- `--dqn-hidden` (default: `256`)
 - `--batch-size` (default: `64`)
 - `--seq-len` (default: `16`)
 - `--src-x`, `--src-y` (default: `0.0`, `0.0`)
 - `--wind-x` (default: `0.0`)
+- `--sigma-c` (default: `1.0`)
 - `--eval-episodes` (default: `10`)
 - `--force-cpu`
 
@@ -65,10 +73,11 @@ python3 eval.py --run-dir runs/drqn_main_YYYYMMDD_HHMMSS --episodes 20 --save-gi
 - `--save-gif` / `--no-save-gif` (default: `--save-gif`)
 
 ## Output Structure
-`main.py` 실행 시 결과는 `runs/drqn_main_YYYYMMDD_HHMMSS/`에 저장됩니다.
+`main.py` 실행 시 결과는 `runs/{agent}_main_YYYYMMDD_HHMMSS/`에 저장됩니다.
+(`{agent}`는 `drqn` 또는 `dqn`)
 
 ```text
-runs/drqn_main_YYYYMMDD_HHMMSS/
+runs/{agent}_main_YYYYMMDD_HHMMSS/
 ├── checkpoints/
 │   ├── best.pt
 │   └── final.pt

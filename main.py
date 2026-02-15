@@ -20,9 +20,11 @@ def main():
     parser.add_argument("--force-cpu", action="store_true")
 
     # [Train 관련]
+    parser.add_argument("--agent-type", choices=["drqn", "dqn"], default="drqn")
     parser.add_argument("--total-episodes", type=int, default=600)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--rnn-hidden", type=int, default=147)
+    parser.add_argument("--dqn-hidden", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seq-len", type=int, default=16)
     
@@ -39,6 +41,7 @@ def main():
     parser.add_argument("--src-x", type=float, default=0.0)
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
+    parser.add_argument("--sigma-c", type=float, default=1.0)
 
     # [Eval/Plot 관련]
     parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes for evaluation")
@@ -54,7 +57,7 @@ def main():
 
     # 실행 이름 자동 생성 (예: drqn_main_20260215_1200)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    run_name = f"drqn_main_{timestamp}"
+    run_name = f"{args.agent_type}_main_{timestamp}"
     
     # args 객체에 run_name 주입 (train.py가 사용)
     args.run_name = run_name
