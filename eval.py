@@ -101,9 +101,16 @@ def evaluate(args):
     print(f"  > Avg Return:   {avg_return:.2f}")
 
     # Plot
+    plots_dir = os.path.join(args.run_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
     plot_config = env_kwargs.copy()
     plot_config['sigma_c'] = conf.get('sigma_c', 1.0)
-    plotter.plot_trajs_png(plot_config, os.path.join(args.run_dir, "eval_result.png"), trajectories, f"Eval: {ckpt_name}")
+    plotter.plot_trajs_png(
+        plot_config,
+        os.path.join(plots_dir, "trajectory.png"),
+        trajectories,
+        f"Eval: {ckpt_name}",
+    )
     
     env.close()
 
@@ -133,7 +140,7 @@ def evaluate(args):
         
         env_gif.close()
         
-        gif_path = os.path.join(args.run_dir, "best_agent.gif")
+        gif_path = os.path.join(plots_dir, "best_agent.gif")
         if frames:
             plotter.save_gif(frames, gif_path, fps=30)
         else:

@@ -21,21 +21,21 @@ pip install -r requirements.txt
 학습 후 같은 run 디렉터리에서 평가와 시각화를 자동으로 수행합니다.
 
 ```bash
-python3 main.py --total-episodes 10000
+python3 main.py --total-episodes 500 --eps-decay-steps 200
 ```
 
 예시 (환경 파라미터 변경):
 ```bash
 python3 main.py \
-  --total-episodes 2000 \
-  --wind-x 0.5 \
-  --src-x -1.0 \
-  --src-y 0.0
+  --total-episodes 20000 \
+  --wind-x 1.0 \
+  --src-x -2.0 \
+  --sigma-c 1.2 \
 ```
 
 예시 (DQN으로 학습):
 ```bash
-python3 main.py --agent-type dqn --total-episodes 2000
+python3 main.py --agent-type dqn --total-episodes 20000
 ```
 
 ### 2. Train Only
@@ -83,10 +83,10 @@ runs/{agent}_main_YYYYMMDD_HHMMSS/
 │   └── final.pt
 ├── plots/
 │   ├── returns.png
-│   └── steps_to_goal.png
+│   ├── steps_to_goal.png
+│   ├── trajectory.png
+│   └── best_agent.gif
 ├── config.json
-├── eval_result.png
-└── best_agent.gif
 ```
 
 참고:

@@ -72,6 +72,7 @@ class OdorHoldEnv(gym.Env):
         self._img_size = 360
         self._sense_pt = None
         self._render_scan_idx = 0
+        self._render_mode = 0
         self._heatmap_img = None
         self._cbar_img = None
         self._trail = []
@@ -178,6 +179,8 @@ class OdorHoldEnv(gym.Env):
         self.cast_phase = 0
         self.need_turn = False
         self._scan_c[:] = 0.0
+        self._render_scan_idx = 0
+        self._render_mode = 0
         self._trail = [(self.x, self.y)]
         
         # Init Obs
@@ -196,6 +199,7 @@ class OdorHoldEnv(gym.Env):
         side = int(self._scan_seq[i])
         phi = float(self._scan_dirs[side])
         self._render_scan_idx = 1 if side == 0 else 2
+        self._render_mode = 1
         c = self._sense(phi)
         self._scan_c[i] = float(c)
         self._push_obs(c, mode=1)
@@ -227,10 +231,14 @@ class OdorHoldEnv(gym.Env):
             if a == 2: # TURN_L
                 self.th = self._norm_angle(self.th + self.cast_turn)
                 self.need_turn = False; did_turn = True
+                self._render_scan_idx = 0
+                self._render_mode = 0
                 c = self._sense(0.0); self._push_obs(c, mode=0)
             elif a == 3: # TURN_R
                 self.th = self._norm_angle(self.th - self.cast_turn)
                 self.need_turn = False; did_turn = True
+                self._render_scan_idx = 0
+                self._render_mode = 0
                 c = self._sense(0.0); self._push_obs(c, mode=0)
             else: # Invalid
                 invalid = True; mode = 1
@@ -245,6 +253,8 @@ class OdorHoldEnv(gym.Env):
                 self.x += self.v * np.cos(self.th) * self.dt
                 self.y += self.v * np.sin(self.th) * self.dt
                 moved = True
+                self._render_scan_idx = 0
+                self._render_mode = 0
                 c = self._sense(0.0); self._push_obs(c, mode=0)
             else: # Invalid Turn
                 invalid = True; mode = 0
@@ -273,45 +283,80 @@ class OdorHoldEnv(gym.Env):
     def render(self):
         if self.render_mode not in (None, "rgb_array"):
             return None
-        if self._heatmap_img is None:
-            self._heatmap_img = self._build_heatmap()
+        try:
+            from PIL import Image, ImageDraw
+        except Exception:
+            if self._heatmap_img is None:
+                self._heatmap_img = self._build_heatmap()
+            return self._heatmap_img.copy()
 
-        frame = self._heatmap_img.copy()
+        W = H = self._img_size
+        if self._heatmap_img is None or self._heatmap_img.shape[:2] != (H, W):
+            self._heatmap_img = self._build_heatmap()
+            bar_w = max(10, int(W * 0.04))
+            bar_h = max(80, int(H * 0.5))
+            grad = np.linspace(1.0, 0.0, bar_h, dtype=np.float32)[:, None]
+            try:
+                from matplotlib import cm
+                bar_rgb = (cm.inferno(grad)[..., :3] * 255.0).astype(np.uint8)
+            except Exception:
+                v = (grad * 255.0).astype(np.uint8)
+                bar_rgb = np.stack([v, v, v], axis=-1)
+            # bar_rgb: (H, 1, 3) -> tile width axis to (H, W, 3)
+            self._cbar_img = np.repeat(bar_rgb, bar_w, axis=1)
+
+        img = Image.fromarray(self._heatmap_img.copy(), mode="RGB")
+        draw = ImageDraw.Draw(img)
 
         # Border
-        frame[0, :, :] = 255
-        frame[-1, :, :] = 255
-        frame[:, 0, :] = 255
-        frame[:, -1, :] = 255
+        draw.rectangle((0, 0, W - 1, H - 1), outline=(255, 255, 255), width=1)
 
-        # Goal + source
+        # Goal + source marker
         src_px, src_py = self._world_to_px(self.src_x, self.src_y)
-        goal_r = max(1, int(round(self.r_goal / (2.0 * self.L) * (self._img_size - 1))))
-        for t in np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False):
-            gx = int(round(src_px + goal_r * np.cos(t)))
-            gy = int(round(src_py + goal_r * np.sin(t)))
-            if 0 <= gx < self._img_size and 0 <= gy < self._img_size:
-                frame[gy, gx] = np.array([210, 210, 210], dtype=np.uint8)
-        self._draw_disk(frame, src_px, src_py, 3, np.array([255, 255, 255], dtype=np.uint8))
+        rg = max(1, int(round(self.r_goal / (2.0 * self.L) * (W - 1))))
+        draw.ellipse((src_px - rg, src_py - rg, src_px + rg, src_py + rg), outline=(190, 190, 190), width=2)
+        rs = 4
+        draw.ellipse((src_px - rs, src_py - rs, src_px + rs, src_py + rs), fill=(0, 0, 0))
 
-        # Trail
-        for tx, ty in self._trail[::2]:
-            px, py = self._world_to_px(tx, ty)
-            self._draw_disk(frame, px, py, 1, np.array([80, 220, 255], dtype=np.uint8))
+        # Trajectory as connected polyline + start/end markers
+        if len(self._trail) > 1:
+            pts = [self._world_to_px(tx, ty) for tx, ty in self._trail]
+            draw.line(pts, fill=(80, 220, 255), width=2)
+            sx, sy = pts[0]
+            ex, ey = pts[-1]
+            draw.line((sx - 4, sy - 4, sx + 4, sy + 4), fill=(255, 255, 255), width=2)
+            draw.line((sx - 4, sy + 4, sx + 4, sy - 4), fill=(255, 255, 255), width=2)
+            draw.rectangle((ex - 3, ey - 3, ex + 3, ey + 3), outline=(255, 255, 255), width=2)
 
-        # Agent + heading
+        # Agent as oriented triangle
         ax, ay = self._world_to_px(self.x, self.y)
-        self._draw_disk(frame, ax, ay, 3, np.array([0, 170, 255], dtype=np.uint8))
-        hx = self.x + 0.25 * np.cos(self.th)
-        hy = self.y + 0.25 * np.sin(self.th)
-        hpx, hpy = self._world_to_px(hx, hy)
-        self._draw_line(frame, ax, ay, hpx, hpy, np.array([0, 255, 255], dtype=np.uint8))
+        size = 10
+        p0 = (ax + size * np.cos(self.th), ay - size * np.sin(self.th))
+        p1 = (ax + size * np.cos(self.th + 2.5), ay - size * np.sin(self.th + 2.5))
+        p2 = (ax + size * np.cos(self.th - 2.5), ay - size * np.sin(self.th - 2.5))
+        tri = [tuple(map(int, p0)), tuple(map(int, p1)), tuple(map(int, p2))]
+        draw.polygon(tri, fill=(50, 100, 220))
 
+        # Sensing ray + current sensor point + scan direction label (F/L/R)
         if self._sense_pt is not None:
             sx, sy = self._world_to_px(self._sense_pt[0], self._sense_pt[1])
-            self._draw_disk(frame, sx, sy, 2, np.array([255, 60, 60], dtype=np.uint8))
+            draw.line((ax, ay, sx, sy), fill=(220, 60, 60), width=2)
+            rr = 3
+            draw.ellipse((sx - rr, sy - rr, sx + rr, sy + rr), fill=(220, 60, 60))
+            labels = ("F", "L", "R")
+            draw.text((ax + 8, ay + 8), labels[int(self._render_scan_idx)], fill=(0, 0, 0))
 
-        return frame
+        # Concentration colorbar
+        if self._cbar_img is not None:
+            cbar = Image.fromarray(self._cbar_img, mode="RGB")
+            pad = 6
+            bx = W - cbar.size[0] - pad
+            by = pad
+            img.paste(cbar, (bx, by))
+            draw.text((bx - 2, by - 2), "1.0", fill=(0, 0, 0))
+            draw.text((bx - 2, by + cbar.size[1] - 10), "0.0", fill=(0, 0, 0))
+
+        return np.array(img, dtype=np.uint8)
     
     def close(self):
         self._heatmap_img = None
