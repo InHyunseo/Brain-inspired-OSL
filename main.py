@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--src-x", type=float, default=0.0)
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
+    parser.add_argument("--sigma-c", type=float, default=1.0)
 
     # [Eval/Plot 관련]
     parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes for evaluation")
