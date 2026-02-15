@@ -1,0 +1,21 @@
+# Python & Venv
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# RL Outputs
+runs/
+logs/
+checkpoints/
+data/
+*.pt
+*.pth
+*.png
+*.gif
+*.mp4
