@@ -15,7 +15,7 @@ class OdorHoldEnv(gym.Env):
         r_goal=0.35, b_hold=0.5, b_oob=5.0,
         max_steps=300, stack_n=1, seed=0,
         bg_c=0.0, sensor_noise=0.01,
-        scan_penalty=0.01, turn_penalty=0.01, cast_turn=0.3,
+        scan_penalty=0.02, turn_penalty=0.02, cast_turn=0.4,
     ):
         super().__init__()
         self.render_mode = render_mode
