@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--target-update-every", type=int, default=10)
     parser.add_argument("--eps-start", type=float, default=1.0)
     parser.add_argument("--eps-end", type=float, default=0.05)
-    parser.add_argument("--eps-decay-steps", type=int, default=300)
+    parser.add_argument("--eps-decay-steps", type=int, default=4000)
     parser.add_argument("--log-every", type=int, default=10)
     
     # Env Params
@@ -44,7 +44,7 @@ def main():
     parser.add_argument("--sigma-c", type=float, default=1.0)
 
     # [Eval/Plot 관련]
-    parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes for evaluation")
+    parser.add_argument("--eval-episodes", type=int, default=100, help="Number of episodes for evaluation")
     parser.add_argument("--seed-base", type=int, default=20000)
     parser.add_argument(
         "--save-gif",
