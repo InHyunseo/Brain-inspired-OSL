@@ -69,70 +69,84 @@ def train(args):
     ep_steps_to_goal = []
     best_return = -np.inf
     
-    for ep in range(1, args.total_episodes + 1):
-        obs, _ = env.reset(seed=args.seed + ep)
-        h = None
-        done = False
-        ep_ret = 0
-        traj = []
-        step_count = 0
-        first_goal_step = None
-        
-        # Epsilon Decay
-        frac = min(1.0, (ep / args.eps_decay_steps))
-        epsilon = args.eps_start - frac * (args.eps_start - args.eps_end)
-
-        while not done:
-            action, h_next = agent.get_action(obs, h, epsilon)
-            next_obs, reward, term, trunc, info = env.step(action)
-            done = bool(term or trunc)
-            step_count += 1
-            if first_goal_step is None and info.get("in_goal", 0):
-                first_goal_step = step_count
+    interrupted = False
+    try:
+        for ep in range(1, args.total_episodes + 1):
+            obs, _ = env.reset(seed=args.seed + ep)
+            h = None
+            done = False
+            ep_ret = 0
+            traj = []
+            step_count = 0
+            first_goal_step = None
             
-            traj.append((obs, action, float(reward), next_obs, float(done)))
-            obs = next_obs
-            h = h_next
-            ep_ret += reward
+            # Epsilon Decay
+            frac = min(1.0, (ep / args.eps_decay_steps))
+            epsilon = args.eps_start - frac * (args.eps_start - args.eps_end)
+
+            while not done:
+                action, h_next = agent.get_action(obs, h, epsilon)
+                next_obs, reward, term, trunc, info = env.step(action)
+                done = bool(term or trunc)
+                step_count += 1
+                if first_goal_step is None and info.get("in_goal", 0):
+                    first_goal_step = step_count
+                
+                traj.append((obs, action, float(reward), next_obs, float(done)))
+                obs = next_obs
+                h = h_next
+                ep_ret += reward
+                
+                if len(buffer) > args.learning_starts and len(buffer) > args.batch_size * args.seq_len:
+                    batch = buffer.sample(args.batch_size, args.seq_len)
+                    agent.update(batch)
+
+            buffer.add_episode(traj)
+            ep_returns.append(ep_ret)
+            if first_goal_step is None:
+                ep_steps_to_goal.append(step_count)
+            else:
+                ep_steps_to_goal.append(first_goal_step)
+
+            if ep_ret > best_return:
+                best_return = ep_ret
+                agent.save(os.path.join(run_dir, "checkpoints", "best.pt"))
             
-            if len(buffer) > args.learning_starts and len(buffer) > args.batch_size * args.seq_len:
-                batch = buffer.sample(args.batch_size, args.seq_len)
-                agent.update(batch)
+            if ep % args.target_update_every == 0:
+                agent.sync_target()
 
-        buffer.add_episode(traj)
-        ep_returns.append(ep_ret)
-        if first_goal_step is None:
-            ep_steps_to_goal.append(step_count)
-        else:
-            ep_steps_to_goal.append(first_goal_step)
-
-        if ep_ret > best_return:
-            best_return = ep_ret
-            agent.save(os.path.join(run_dir, "checkpoints", "best.pt"))
-        
-        if ep % args.target_update_every == 0:
-            agent.sync_target()
-
-        if ep % args.log_every == 0:
-            avg_ret = np.mean(ep_returns[-args.log_every:])
-            avg_steps = np.mean(ep_steps_to_goal[-args.log_every:])
-            print(f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} | Eps: {epsilon:.3f}")
-
-    agent.save(os.path.join(run_dir, "checkpoints", "final.pt"))
-    
-    # Plotting
-    plotter.save_raw_ema_png(run_dir, "returns.png", range(1, len(ep_returns)+1), 
-                             ep_returns, ema(ep_returns, 0.05), "Return", (-5, 20))
-    max_steps_plot = max(ep_steps_to_goal) if ep_steps_to_goal else 1
-    plotter.save_raw_ema_png(
-        run_dir,
-        "steps_to_goal.png",
-        range(1, len(ep_steps_to_goal) + 1),
-        ep_steps_to_goal,
-        ema(ep_steps_to_goal, 0.05),
-        "Step to Source",
-        (0, max_steps_plot + 5),
-    )
+            if ep % args.log_every == 0:
+                avg_ret = np.mean(ep_returns[-args.log_every:])
+                avg_steps = np.mean(ep_steps_to_goal[-args.log_every:])
+                print(f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} | Eps: {epsilon:.3f}")
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\n[Warn] Training interrupted. Saving partial artifacts...")
+    finally:
+        agent.save(os.path.join(run_dir, "checkpoints", "final.pt"))
+        if ep_returns:
+            plotter.save_raw_ema_png(
+                run_dir,
+                "returns.png",
+                range(1, len(ep_returns) + 1),
+                ep_returns,
+                ema(ep_returns, 0.05),
+                "Return",
+                (-5, 20),
+            )
+            max_steps_plot = max(ep_steps_to_goal) if ep_steps_to_goal else 1
+            plotter.save_raw_ema_png(
+                run_dir,
+                "steps_to_goal.png",
+                range(1, len(ep_steps_to_goal) + 1),
+                ep_steps_to_goal,
+                ema(ep_steps_to_goal, 0.05),
+                "Step to Source",
+                (0, max_steps_plot + 5),
+            )
+        env.close()
+    if interrupted:
+        raise KeyboardInterrupt
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
