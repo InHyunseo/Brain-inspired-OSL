@@ -11,7 +11,7 @@ class OdorHoldEnv(gym.Env):
         L=3.0, dt=0.1, v_fixed=0.25,
         src_x=0.0, src_y=0.0,
         wind_x=1.0, wind_y=0.0,
-        sensor_offset=0.08, sigma_c=1.0, sigma_r=1.0,
+        sensor_offset=0.08, sigma_c=1.0, sigma_r=0.8,
         r_goal=0.35, b_hold=0.5, b_oob=5.0,
         max_steps=300, stack_n=1, seed=0,
         bg_c=0.0, sensor_noise=0.01,
