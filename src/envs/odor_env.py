@@ -151,11 +151,18 @@ class OdorHoldEnv(gym.Env):
         ys = np.linspace(self.L, -self.L, size, dtype=np.float32)
         X, Y = np.meshgrid(xs, ys)
         c = self._conc(X, Y).astype(np.float32)
-
-        r = np.clip(4.0 * c - 1.5, 0.0, 1.0)
-        g = np.clip(4.0 * c - 2.5, 0.0, 1.0)
-        b = np.clip(4.0 * c - 3.5, 0.0, 1.0)
-        return (np.stack([r, g, b], axis=-1) * 255.0).astype(np.uint8)
+        try:
+            from matplotlib import cm
+            # Keep GIF heatmap visually aligned with plot_trajs_png (inferno + alpha=0.5 on white).
+            rgb = cm.inferno(c)[..., :3].astype(np.float32)
+            rgb = rgb * 0.5 + 1.0 * 0.5
+            return np.clip(rgb * 255.0, 0.0, 255.0).astype(np.uint8)
+        except Exception:
+            # Fallback when matplotlib colormap is unavailable.
+            r = np.clip(4.0 * c - 1.5, 0.0, 1.0)
+            g = np.clip(4.0 * c - 2.5, 0.0, 1.0)
+            b = np.clip(4.0 * c - 3.5, 0.0, 1.0)
+            return (np.stack([r, g, b], axis=-1) * 255.0).astype(np.uint8)
 
     def reset(self, seed=None, options=None):
         if seed is not None:
