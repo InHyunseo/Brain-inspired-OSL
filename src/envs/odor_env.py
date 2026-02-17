@@ -153,9 +153,8 @@ class OdorHoldEnv(gym.Env):
         c = self._conc(X, Y).astype(np.float32)
         try:
             from matplotlib import cm
-            # Keep GIF heatmap visually aligned with plot_trajs_png (inferno + alpha=0.5 on white).
+            # Use raw inferno tones so low concentration stays near-black (no white blend).
             rgb = cm.inferno(c)[..., :3].astype(np.float32)
-            rgb = rgb * 0.5 + 1.0 * 0.5
             return np.clip(rgb * 255.0, 0.0, 255.0).astype(np.uint8)
         except Exception:
             # Fallback when matplotlib colormap is unavailable.
@@ -312,8 +311,8 @@ class OdorHoldEnv(gym.Env):
             # bar_rgb: (H, 1, 3) -> tile width axis to (H, W, 3)
             self._cbar_img = np.repeat(bar_rgb, bar_w, axis=1)
 
-        img = Image.fromarray(self._heatmap_img.copy(), mode="RGB")
-        draw = ImageDraw.Draw(img)
+        map_img = Image.fromarray(self._heatmap_img.copy(), mode="RGB")
+        draw = ImageDraw.Draw(map_img)
 
         # Border
         draw.rectangle((0, 0, W - 1, H - 1), outline=(255, 255, 255), width=1)
@@ -354,16 +353,23 @@ class OdorHoldEnv(gym.Env):
             draw.text((ax + 8, ay + 8), labels[int(self._render_scan_idx)], fill=(0, 0, 0))
 
         # Concentration colorbar
+        panel_w = max(52, int(W * 0.16))
+        panel_pad = 10
+        out_w = W + panel_w
+        out_img = Image.new("RGB", (out_w, H), color=(0, 0, 0))
+        out_img.paste(map_img, (0, 0))
+
         if self._cbar_img is not None:
             cbar = Image.fromarray(self._cbar_img, mode="RGB")
-            pad = 6
-            bx = W - cbar.size[0] - pad
-            by = pad
-            img.paste(cbar, (bx, by))
-            draw.text((bx - 2, by - 2), "1.0", fill=(0, 0, 0))
-            draw.text((bx - 2, by + cbar.size[1] - 10), "0.0", fill=(0, 0, 0))
+            cbar_w, cbar_h = cbar.size
+            bx = W + (panel_w - cbar_w) // 2
+            by = (H - cbar_h) // 2
+            out_img.paste(cbar, (bx, by))
+            panel_draw = ImageDraw.Draw(out_img)
+            panel_draw.text((bx, max(panel_pad, by - 14)), "1.0", fill=(255, 255, 255))
+            panel_draw.text((bx, min(H - 14, by + cbar_h + 2)), "0.0", fill=(255, 255, 255))
 
-        return np.array(img, dtype=np.uint8)
+        return np.array(out_img, dtype=np.uint8)
     
     def close(self):
         self._heatmap_img = None

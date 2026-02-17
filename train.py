@@ -7,7 +7,6 @@ import torch
 import gymnasium as gym
 from gymnasium.envs.registration import register
 
-from src.envs.odor_env import OdorHoldEnv
 from src.utils.buffer import EpisodeReplayBuffer
 from src.agents.drqn_agent import DRQNAgent
 from src.agents.dqn_agent import DQNAgent
@@ -17,14 +16,6 @@ def make_env(env_id, **kwargs):
     if env_id not in gym.envs.registry:
         register(id=env_id, entry_point='src.envs.odor_env:OdorHoldEnv', kwargs=kwargs)
     return gym.make(env_id, **kwargs)
-
-def ema(arr, alpha):
-    out = []
-    m = arr[0] if arr else 0
-    for x in arr:
-        m = alpha * x + (1 - alpha) * m
-        out.append(m)
-    return out
 
 def train(args):
     # 1. Setup
@@ -125,25 +116,8 @@ def train(args):
     finally:
         agent.save(os.path.join(run_dir, "checkpoints", "final.pt"))
         if ep_returns:
-            plotter.save_raw_ema_png(
-                run_dir,
-                "returns.png",
-                range(1, len(ep_returns) + 1),
-                ep_returns,
-                ema(ep_returns, 0.05),
-                "Return",
-                (-5, 20),
-            )
-            max_steps_plot = max(ep_steps_to_goal) if ep_steps_to_goal else 1
-            plotter.save_raw_ema_png(
-                run_dir,
-                "steps_to_goal.png",
-                range(1, len(ep_steps_to_goal) + 1),
-                ep_steps_to_goal,
-                ema(ep_steps_to_goal, 0.05),
-                "Step to Source",
-                (0, max_steps_plot + 5),
-            )
+            plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
+            plotter.plot_training_pngs_from_data(run_dir)
         env.close()
     if interrupted:
         raise KeyboardInterrupt

@@ -52,6 +52,19 @@ python3 train.py --total-episodes 600 --out-dir runs --run-name my_run
 python3 eval.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --episodes 20 --save-gif
 ```
 
+### 4. Replot Only (Saved Data -> PNG)
+이미 저장된 `plot_data`(JSON/CSV)를 읽어 PNG만 다시 생성합니다.
+
+```bash
+python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target all
+```
+
+부분 재생성:
+```bash
+python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target train  # returns/steps
+python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval   # trajectory
+```
+
 ## Common Arguments
 `main.py` 기준 자주 쓰는 인자:
 - `--total-episodes` (default: `600`)
@@ -86,6 +99,11 @@ runs/{agent}_main_YYYYMMDD_HHMMSS/
 │   ├── steps_to_goal.png
 │   ├── trajectory.png
 │   └── best_agent.gif
+├── plot_data/
+│   ├── training_metrics.json
+│   ├── returns.csv
+│   ├── steps_to_goal.csv
+│   └── eval_trajectories.json
 ├── config.json
 ```
 

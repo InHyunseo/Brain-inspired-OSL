@@ -100,24 +100,19 @@ def evaluate(args):
     print(f"  > Success Rate: {success_rate * 100:.1f}%")
     print(f"  > Avg Return:   {avg_return:.2f}")
 
-    # Plot
+    # Plot data save + plot render from saved data
     plots_dir = os.path.join(args.run_dir, "plots")
     os.makedirs(plots_dir, exist_ok=True)
     plot_config = env_kwargs.copy()
     plot_config['sigma_c'] = conf.get('sigma_c', 1.0)
-    plotter.plot_trajs_png(
-        plot_config,
-        os.path.join(plots_dir, "trajectory.png"),
-        trajectories,
-        f"Eval: {ckpt_name}",
-    )
+    plotter.save_eval_plot_data(args.run_dir, plot_config, trajectories, f"Eval: {ckpt_name}")
+    plotter.plot_trajectory_png_from_data(args.run_dir, os.path.join(plots_dir, "trajectory.png"))
     
     env.close()
 
     # --- GIF Generation (Here!) ---
     if args.save_gif:
         print(f"[Info] Generating GIF with model: {ckpt_name}")
-        # 중요: render_mode="rgb_array"로 환경 다시 생성
         env_gif = OdorHoldEnv(render_mode="rgb_array", **env_kwargs)
         
         frames = []
@@ -126,17 +121,15 @@ def evaluate(args):
         h = None
         done = False
         
-        # 첫 프레임
-        frame = env_gif.render()
-        if frame is not None: frames.append(frame)
+        # 첫 프레임: trajectory.png와 동일한 matplotlib 스타일 + agent/casting 오버레이
+        frames.append(plotter.render_rollout_frame_png_style(env_gif, title=f"Eval: {ckpt_name}"))
 
         while not done:
             action, h = agent.get_action(obs, h, epsilon=0.0)
             obs, _, term, trunc, _ = env_gif.step(action)
             done = term or trunc
             
-            frame = env_gif.render()
-            if frame is not None: frames.append(frame)
+            frames.append(plotter.render_rollout_frame_png_style(env_gif, title=f"Eval: {ckpt_name}"))
         
         env_gif.close()
         
