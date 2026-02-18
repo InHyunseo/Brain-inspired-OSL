@@ -143,11 +143,11 @@ if __name__ == "__main__":
     p.add_argument("--buffer-size", type=int, default=150000)
     p.add_argument("--seq-len", type=int, default=16)
     p.add_argument("--learning-starts", type=int, default=5000) # steps가 아니라 buffer size 체크용
-    p.add_argument("--target-update-every", type=int, default=10) # episode 단위
+    p.add_argument("--target-update-every", type=int, default=20) # episode 단위
     p.add_argument("--eps-start", type=float, default=1.0)
     p.add_argument("--eps-end", type=float, default=0.05)
     p.add_argument("--eps-decay-steps", type=int, default=300) # episode 단위
-    p.add_argument("--log-every", type=int, default=10)
+    p.add_argument("--log-every", type=int, default=20)
     p.add_argument("--force-cpu", action="store_true")
 
     args = p.parse_args()

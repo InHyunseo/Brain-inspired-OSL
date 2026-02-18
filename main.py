@@ -25,17 +25,17 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--rnn-hidden", type=int, default=147)
     parser.add_argument("--dqn-hidden", type=int, default=256)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--seq-len", type=int, default=16)
     
     # Hyperparams (Train.py와 변수명 일치시킴)
     parser.add_argument("--buffer-size", type=int, default=150000)
     parser.add_argument("--learning-starts", type=int, default=5000)
-    parser.add_argument("--target-update-every", type=int, default=10)
+    parser.add_argument("--target-update-every", type=int, default=20)
     parser.add_argument("--eps-start", type=float, default=1.0)
     parser.add_argument("--eps-end", type=float, default=0.05)
     parser.add_argument("--eps-decay-steps", type=int, default=4000)
-    parser.add_argument("--log-every", type=int, default=10)
+    parser.add_argument("--log-every", type=int, default=20)
     
     # Env Params
     parser.add_argument("--src-x", type=float, default=0.0)
