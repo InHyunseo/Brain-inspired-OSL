@@ -21,7 +21,7 @@ pip install -r requirements.txt
 학습 후 같은 run 디렉터리에서 평가와 시각화를 자동으로 수행합니다.
 
 ```bash
-python3 main.py --total-episodes 500 --eps-decay-steps 200
+python3 main.py --total-episodes 6000 --eps-decay-steps 1000
 ```
 
 예시 (환경 파라미터 변경):
@@ -42,7 +42,7 @@ python3 main.py --agent-type dqn --total-episodes 20000
 평가 없이 학습만 수행합니다.
 
 ```bash
-python3 train.py --total-episodes 600 --out-dir runs --run-name my_run
+python3 train.py --total-episodes 6000 --out-dir runs
 ```
 
 ### 3. Eval Only
