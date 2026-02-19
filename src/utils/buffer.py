@@ -45,3 +45,30 @@ class EpisodeReplayBuffer:
             np.stack(rew_seqs, axis=0),
             np.stack(done_seqs, axis=0),
         )
+
+    def sample_continuous(self, batch_size, seq_len):
+        candidates = [ep for ep in self.episodes if len(ep) >= seq_len]
+        if not candidates:
+            raise RuntimeError("Buffer insufficient for sampling sequences.")
+
+        obs_seqs, act_seqs, rew_seqs, done_seqs = [], [], [], []
+
+        for _ in range(batch_size):
+            ep = random.choice(candidates)
+            s = random.randint(0, len(ep) - seq_len)
+            chunk = ep[s:s + seq_len]
+
+            o0 = chunk[0][0]
+            obs_seq = [o0] + [tr[3] for tr in chunk]
+
+            obs_seqs.append(np.asarray(obs_seq, dtype=np.float32))
+            act_seqs.append(np.asarray([tr[1] for tr in chunk], dtype=np.float32))
+            rew_seqs.append(np.asarray([tr[2] for tr in chunk], dtype=np.float32))
+            done_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
+
+        return (
+            np.stack(obs_seqs, axis=0),
+            np.stack(act_seqs, axis=0),
+            np.stack(rew_seqs, axis=0),
+            np.stack(done_seqs, axis=0),
+        )

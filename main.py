@@ -20,9 +20,15 @@ def main():
     parser.add_argument("--force-cpu", action="store_true")
 
     # [Train 관련]
-    parser.add_argument("--agent-type", choices=["drqn", "dqn"], default="drqn")
+    parser.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="drqn")
     parser.add_argument("--total-episodes", type=int, default=600)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr-actor", type=float, default=3e-4)
+    parser.add_argument("--lr-critic", type=float, default=3e-4)
+    parser.add_argument("--lr-alpha", type=float, default=3e-4)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--tau", type=float, default=0.005)
+    parser.add_argument("--rnn-cell", choices=["gru", "rnn"], default="gru")
     parser.add_argument("--rnn-hidden", type=int, default=147)
     parser.add_argument("--dqn-hidden", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -36,6 +42,9 @@ def main():
     parser.add_argument("--eps-end", type=float, default=0.05)
     parser.add_argument("--eps-decay-steps", type=int, default=4000)
     parser.add_argument("--log-every", type=int, default=20)
+    parser.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--first-milestone-ep", type=int, default=100)
+    parser.add_argument("--milestone-every", type=int, default=10)
     
     # Env Params
     parser.add_argument("--src-x", type=float, default=0.0)
@@ -51,6 +60,12 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Save rollout GIF during evaluation (default: True)",
+    )
+    parser.add_argument(
+        "--plot-milestones",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Render milestone trajectory PNGs when available",
     )
 
     args = parser.parse_args()

@@ -10,12 +10,8 @@ venv/
 .idea/
 
 # RL Outputs
-*.pt
+
 logs/
-checkpoints/
 data/
-*.pt
 *.pth
-*.png
-*.gif
 *.mp4
