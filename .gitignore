@@ -10,7 +10,7 @@ venv/
 .idea/
 
 # RL Outputs
-runs/
+*.pt
 logs/
 checkpoints/
 data/
