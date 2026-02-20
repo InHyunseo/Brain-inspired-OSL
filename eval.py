@@ -21,6 +21,9 @@ def load_config(run_dir):
 def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
     trajectories = []
     success_count = 0
+    cast_counts = []
+    cast_step_ratios = []
+    can_turn_ratios = []
     for i in range(episodes):
         obs, _ = env.reset(seed=seed_base + i)
         h = None
@@ -28,6 +31,10 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
         xs, ys = [env.x], [env.y]
         ep_ret = 0.0
         in_goal = False
+        cast_count = 0
+        cast_steps = 0
+        can_turn_steps = 0
+        total_steps = 0
 
         while not done:
             if agent_type == "rsac":
@@ -36,6 +43,10 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
                 action, h = agent.get_action(obs, h, epsilon=0.0)
             obs, r, term, trunc, info = env.step(action)
             done = term or trunc
+            total_steps += 1
+            cast_count += int(info.get("did_cast", 0))
+            cast_steps += int(info.get("in_cast", 0))
+            can_turn_steps += int(info.get("can_turn", 0))
             xs.append(env.x)
             ys.append(env.y)
             ep_ret += r
@@ -44,8 +55,20 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
 
         if in_goal:
             success_count += 1
+        cast_counts.append(float(cast_count))
+        if total_steps > 0:
+            cast_step_ratios.append(float(cast_steps) / float(total_steps))
+            can_turn_ratios.append(float(can_turn_steps) / float(total_steps))
+        else:
+            cast_step_ratios.append(0.0)
+            can_turn_ratios.append(0.0)
         trajectories.append({"return": ep_ret, "success": in_goal, "x": xs, "y": ys})
-    return trajectories, success_count
+    stats = {
+        "cast_count_mean": float(np.mean(cast_counts)) if cast_counts else 0.0,
+        "cast_step_ratio_mean": float(np.mean(cast_step_ratios)) if cast_step_ratios else 0.0,
+        "can_turn_ratio_mean": float(np.mean(can_turn_ratios)) if can_turn_ratios else 0.0,
+    }
+    return trajectories, success_count, stats
 
 def evaluate(args):
     conf = load_config(args.run_dir)
@@ -122,13 +145,16 @@ def evaluate(args):
 
     # --- Metrics Evaluation ---
     print(f"[Info] Starting evaluation over {args.episodes} episodes...")
-    trajectories, success_count = _rollout_trajectories(env, agent, agent_type, args.episodes, args.seed_base)
+    trajectories, success_count, rollout_stats = _rollout_trajectories(env, agent, agent_type, args.episodes, args.seed_base)
 
     success_rate = success_count / args.episodes
     avg_return = np.mean([t['return'] for t in trajectories])
     
     print(f"  > Success Rate: {success_rate * 100:.1f}%")
     print(f"  > Avg Return:   {avg_return:.2f}")
+    print(f"  > Avg Cast Cnt: {rollout_stats['cast_count_mean']:.2f} / episode")
+    print(f"  > Cast Step %:  {rollout_stats['cast_step_ratio_mean'] * 100:.1f}%")
+    print(f"  > Can-Turn %:   {rollout_stats['can_turn_ratio_mean'] * 100:.1f}%")
 
     plots_dir = os.path.join(args.run_dir, "plots")
     os.makedirs(plots_dir, exist_ok=True)
@@ -183,32 +209,42 @@ def evaluate(args):
 
     if args.plot_milestones:
         milestone_path = os.path.join(args.run_dir, "plot_data", "milestones.json")
+        ms = {}
         if os.path.exists(milestone_path):
             with open(milestone_path, "r") as f:
                 ms = json.load(f)
-            first_ckpt = os.path.join(args.run_dir, "checkpoints", "first.pt")
-            if not os.path.exists(first_ckpt):
-                # backward compatibility with older runs
-                first_ckpt = os.path.join(args.run_dir, "checkpoints", "ep100.pt")
-            ckpt_map = [
-                ("first", first_ckpt, int(ms.get("first_ep", 1))),
-                ("mid", os.path.join(args.run_dir, "checkpoints", "mid.pt"), int(ms.get("mid_saved_ep", -1))),
-                ("best", os.path.join(args.run_dir, "checkpoints", "best.pt"), int(ms.get("best_ep", -1))),
-            ]
-            for label, ckpt_i, ep_i in ckpt_map:
-                if not os.path.exists(ckpt_i):
-                    continue
-                try:
-                    agent.load(ckpt_i)
-                except Exception as e:
-                    print(f"[Warn] milestone load failed ({label}): {e}")
-                    continue
-                env_m = env_cls(**env_kwargs)
-                traj_i, _ = _rollout_trajectories(env_m, agent, agent_type, args.episodes, args.seed_base)
-                env_m.close()
-                title_i = f"Eval {label} (ep={ep_i})"
-                out_png = os.path.join(plots_dir, f"trajectory_{label}.png")
-                plotter.plot_trajs_png(env_kwargs, out_png, traj_i, title_i)
+
+        first_ckpt = os.path.join(args.run_dir, "checkpoints", "first.pt")
+        if not os.path.exists(first_ckpt):
+            # backward compatibility with older runs
+            first_ckpt = os.path.join(args.run_dir, "checkpoints", "ep100.pt")
+
+        ckpt_map = [
+            ("first", first_ckpt, int(ms.get("first_ep", -1))),
+            ("mid", os.path.join(args.run_dir, "checkpoints", "mid.pt"), int(ms.get("mid_saved_ep", -1))),
+            ("best", os.path.join(args.run_dir, "checkpoints", "best.pt"), int(ms.get("best_ep", -1))),
+        ]
+
+        plotted_any = False
+        for label, ckpt_i, ep_i in ckpt_map:
+            if not os.path.exists(ckpt_i):
+                continue
+            try:
+                agent.load(ckpt_i)
+            except Exception as e:
+                print(f"[Warn] milestone load failed ({label}): {e}")
+                continue
+            env_m = env_cls(**env_kwargs)
+            traj_i, _, _ = _rollout_trajectories(env_m, agent, agent_type, args.episodes, args.seed_base)
+            env_m.close()
+            ep_text = f"ep={ep_i}" if ep_i >= 1 else "ep=unknown"
+            title_i = f"Eval {label} ({ep_text})"
+            out_png = os.path.join(plots_dir, f"trajectory_{label}.png")
+            plotter.plot_trajs_png(env_kwargs, out_png, traj_i, title_i)
+            plotted_any = True
+
+        if not plotted_any:
+            print("[Warn] No milestone checkpoints found for trajectory plotting.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
