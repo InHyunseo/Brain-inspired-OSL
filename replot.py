@@ -1,6 +1,7 @@
 import argparse
 
 from src.utils import plotter
+from src.utils.seed import set_global_seed
 from eval import evaluate
 
 
@@ -15,8 +16,10 @@ def main():
     )
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--seed-base", type=int, default=20000)
+    p.add_argument("--seed", type=int, default=42)
     p.add_argument("--force-cpu", action="store_true")
     args = p.parse_args()
+    set_global_seed(args.seed)
 
     if args.target in ("all", "train"):
         plotter.plot_training_pngs_from_data(args.run_dir)
@@ -27,6 +30,7 @@ def main():
             ckpt=None,
             episodes=args.episodes,
             seed_base=args.seed_base,
+            seed=args.seed,
             force_cpu=args.force_cpu,
             save_gif=False,
             plot_milestones=True,

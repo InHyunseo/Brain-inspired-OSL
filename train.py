@@ -14,6 +14,8 @@ from src.agents.drqn_agent import DRQNAgent
 from src.agents.dqn_agent import DQNAgent
 from src.agents.rsac_agent import RSACAgent
 from src.utils import plotter
+from src.utils.seed import set_global_seed
+
 
 def make_env(env_id, **kwargs):
     if env_id not in gym.envs.registry:
@@ -25,6 +27,8 @@ def make_env(env_id, **kwargs):
     return gym.make(env_id, **kwargs)
 
 def train(args):
+    set_global_seed(args.seed)
+
     # 1. Setup
     run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.out_dir, run_name)
@@ -62,6 +66,9 @@ def train(args):
             terminate_on_hold=getattr(args, "terminate_on_hold", True),
         )
     env = make_env(args.env_id, **env_kwargs)
+    env.action_space.seed(args.seed)
+    if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
+        env.observation_space.seed(args.seed)
     if args.agent_type == "dqn":
         agent = DQNAgent(
             env.observation_space.shape[0],

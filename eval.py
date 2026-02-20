@@ -10,6 +10,7 @@ from src.agents.drqn_agent import DRQNAgent
 from src.agents.dqn_agent import DQNAgent
 from src.agents.rsac_agent import RSACAgent
 from src.utils import plotter
+from src.utils.seed import set_global_seed
 
 def load_config(run_dir):
     config_path = os.path.join(run_dir, "config.json")
@@ -91,6 +92,8 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
 
 def evaluate(args):
     conf = load_config(args.run_dir)
+    seed = int(getattr(args, "seed", conf.get("seed", 0)))
+    set_global_seed(seed)
     device = torch.device("cpu") if args.force_cpu else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Info] Evaluating on {device}")
 
@@ -123,6 +126,9 @@ def evaluate(args):
     env_id = conf.get("env_id", "OdorHold-v3")
     env_cls = OdorHoldEnvV4 if str(env_id).endswith("-v4") else OdorHoldEnv
     env = env_cls(**env_kwargs)
+    env.action_space.seed(seed)
+    if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
+        env.observation_space.seed(seed)
     obs_dim = env.observation_space.shape[0]
 
     agent_type = conf.get("agent_type", "drqn")
@@ -285,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None)
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--seed-base", type=int, default=20000)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument(
         "--save-gif",

@@ -6,6 +6,7 @@ import torch
 # 우리가 만든 모듈들 가져오기
 from train import train
 from eval import evaluate
+from src.utils.seed import set_global_seed
 
 def main():
     # ==========================================
@@ -80,6 +81,7 @@ def main():
     )
 
     args = parser.parse_args()
+    set_global_seed(args.seed)
 
     # 실행 이름 자동 생성 (예: drqn_main_20260215_1200)
     if args.run_name is None:
