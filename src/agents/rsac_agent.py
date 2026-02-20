@@ -51,7 +51,7 @@ class RSACAgent:
 
         self.log_alpha = torch.zeros(1, device=device, requires_grad=True)
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr_alpha)
-        self.target_entropy = -float(act_dim)
+        self.target_entropy = -float(act_dim)*0.5
 
         self.loss_fn = nn.MSELoss()
 
