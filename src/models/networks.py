@@ -137,7 +137,16 @@ class RecurrentHybridActor(nn.Module):
     - continuous part: tanh-squashed Gaussian for [v, omega]
     - discrete part: Bernoulli for cast start decision
     """
-    def __init__(self, obs_dim, cont_act_dim, hidden=147, cell_type="gru", log_std_min=-5.0, log_std_max=2.0):
+    def __init__(
+        self,
+        obs_dim,
+        cont_act_dim,
+        hidden=147,
+        cell_type="gru",
+        log_std_min=-5.0,
+        log_std_max=2.0,
+        cast_temperature=0.5,
+    ):
         super().__init__()
         self.rnn = _build_rnn(cell_type, obs_dim, hidden)
         self.mu = nn.Linear(hidden, cont_act_dim)
@@ -145,6 +154,7 @@ class RecurrentHybridActor(nn.Module):
         self.cast_logit = nn.Linear(hidden, 1)
         self.log_std_min = float(log_std_min)
         self.log_std_max = float(log_std_max)
+        self.cast_temperature = float(max(cast_temperature, 1e-3))
 
     def forward(self, obs, h=None):
         if obs.dim() == 2:
@@ -171,9 +181,17 @@ class RecurrentHybridActor(nn.Module):
         cont_log_prob = normal.log_prob(x) - torch.log(cont_scale * (1.0 - y.pow(2)) + 1e-6)
         cont_log_prob = cont_log_prob.sum(dim=-1, keepdim=True)
 
+        # Straight-through Bernoulli sampling for cast so Q-gradient reaches cast_logit.
+        # Forward uses hard {0,1}, backward uses relaxed sample gradient.
+        u = torch.rand_like(cast_logit)
+        u = torch.clamp(u, 1e-6, 1.0 - 1e-6)
+        logistic_noise = torch.log(u) - torch.log1p(-u)
+        cast_soft = torch.sigmoid((cast_logit + logistic_noise) / self.cast_temperature)
+        cast_hard = (cast_soft > 0.5).float()
+        cast_action = cast_hard + cast_soft - cast_soft.detach()
+
         bern = Bernoulli(logits=cast_logit)
-        cast_action = bern.sample()
-        disc_log_prob = bern.log_prob(cast_action)
+        disc_log_prob = bern.log_prob(cast_hard)
 
         action = torch.cat([cont_action, cast_action], dim=-1)
         log_prob = (cont_log_prob + disc_log_prob).squeeze(-1)
