@@ -53,7 +53,7 @@ class RSACAgent:
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr_alpha)
         self.target_entropy = -float(act_dim)*0.5
 
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()
 
     @property
     def alpha(self):
