@@ -16,6 +16,7 @@ def main():
     # [공통]
     parser.add_argument("--env-id", default="OdorHold-v3")
     parser.add_argument("--out-dir", default="runs", help="Root directory for results")
+    parser.add_argument("--run-name", default=None, help="Optional fixed run name")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force-cpu", action="store_true")
 
@@ -81,8 +82,11 @@ def main():
     args = parser.parse_args()
 
     # 실행 이름 자동 생성 (예: drqn_main_20260215_1200)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    run_name = f"{args.agent_type}_main_{timestamp}"
+    if args.run_name is None:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        run_name = f"{args.agent_type}_main_{timestamp}"
+    else:
+        run_name = str(args.run_name)
     
     # args 객체에 run_name 주입 (train.py가 사용)
     args.run_name = run_name

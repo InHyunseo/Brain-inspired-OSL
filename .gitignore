@@ -15,3 +15,5 @@ logs/
 data/
 *.pth
 *.mp4
+*.png
+*.gif

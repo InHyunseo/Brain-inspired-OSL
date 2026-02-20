@@ -2,6 +2,7 @@ import os
 import time
 import json
 import shutil
+import tempfile
 import argparse
 import numpy as np
 import torch
@@ -19,7 +20,7 @@ def make_env(env_id, **kwargs):
         if str(env_id).endswith("-v4"):
             ep = 'src.envs.odor_env_v4:OdorHoldEnvV4'
         else:
-            ep = 'src.envs.odor_env:OdorHoldEnv'
+            ep = 'src.envs.odor_env_v3:OdorHoldEnv'
         register(id=env_id, entry_point=ep, kwargs=kwargs)
     return gym.make(env_id, **kwargs)
 
@@ -29,9 +30,11 @@ def train(args):
     run_dir = os.path.join(args.out_dir, run_name)
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
-    tmp_mid_dir = os.path.join(run_dir, ".mid_tmp")
+    tmp_mid_dir = None
+    tmp_mid_ctx = None
     if args.save_milestones:
-        os.makedirs(tmp_mid_dir, exist_ok=True)
+        tmp_mid_ctx = tempfile.TemporaryDirectory(prefix=f"{run_name}_mid_", dir="/tmp")
+        tmp_mid_dir = tmp_mid_ctx.name
     
     device = torch.device("cuda" if torch.cuda.is_available() and not args.force_cpu else "cpu")
     
@@ -160,7 +163,7 @@ def train(args):
                 agent.save(os.path.join(ckpt_dir, "first.pt"))
                 first_ep_saved = int(ep)
 
-            if args.save_milestones and ep >= args.first_milestone_ep and ep % args.milestone_every == 0:
+            if args.save_milestones and tmp_mid_dir is not None and ep >= args.first_milestone_ep and ep % args.milestone_every == 0:
                 pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
                 agent.save(pep)
                 if ep not in saved_eps:
@@ -192,11 +195,12 @@ def train(args):
             mid_target = (lo + hi) // 2
 
             cands = [(first_ep, first_path), (int(best_ep), best_path)]
-            for ep in sorted(set(saved_eps)):
-                if lo <= ep <= hi:
-                    p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                    if os.path.exists(p_ep):
-                        cands.append((int(ep), p_ep))
+            if tmp_mid_dir is not None:
+                for ep in sorted(set(saved_eps)):
+                    if lo <= ep <= hi:
+                        p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
+                        if os.path.exists(p_ep):
+                            cands.append((int(ep), p_ep))
 
             mid_ep, mid_src = min(cands, key=lambda item: abs(item[0] - mid_target))
             shutil.copy2(mid_src, os.path.join(ckpt_dir, "mid.pt"))
@@ -212,8 +216,8 @@ def train(args):
             with open(os.path.join(run_dir, "plot_data", "milestones.json"), "w") as f:
                 json.dump(milestone_meta, f, indent=2)
 
-        if args.save_milestones and os.path.isdir(tmp_mid_dir):
-            shutil.rmtree(tmp_mid_dir, ignore_errors=True)
+        if tmp_mid_ctx is not None:
+            tmp_mid_ctx.cleanup()
 
         if ep_returns:
             plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)

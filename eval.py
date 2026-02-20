@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import torch
 
-from src.envs.odor_env import OdorHoldEnv
+from src.envs.odor_env_v3 import OdorHoldEnv
 from src.envs.odor_env_v4 import OdorHoldEnvV4
 from src.agents.drqn_agent import DRQNAgent
 from src.agents.dqn_agent import DQNAgent
