@@ -34,7 +34,15 @@ class OdorHoldEnvV4(gym.Env):
         omega_accel_max=50.0,
         control_penalty=0.01,
         turn_penalty=0.01,
-        cast_penalty=0.02,
+        cast_penalty=0.01,
+        reward_mode="dense",
+        odor_abs_weight=0.0,
+        odor_delta_weight=1.0,
+        cast_info_bonus=0.0,
+        goal_hold_steps=20,
+        goal_complete_bonus=1.0,
+        goal_exit_penalty=0.3,
+        terminate_on_hold=True,
         turn_requires_cast=True,
         turn_window_steps=1,
     ):
@@ -73,10 +81,20 @@ class OdorHoldEnvV4(gym.Env):
         self.control_penalty = float(control_penalty)
         self.turn_penalty = float(turn_penalty)
         self.cast_penalty = float(cast_penalty)
+        self.reward_mode = str(reward_mode).lower()
+        if self.reward_mode not in ("dense", "bio"):
+            raise ValueError("reward_mode must be one of ['dense', 'bio']")
+        self.odor_abs_weight = float(odor_abs_weight)
+        self.odor_delta_weight = float(odor_delta_weight)
+        self.cast_info_bonus = float(cast_info_bonus)
+        self.goal_hold_steps = int(max(1, goal_hold_steps))
+        self.goal_complete_bonus = float(goal_complete_bonus)
+        self.goal_exit_penalty = float(goal_exit_penalty)
+        self.terminate_on_hold = bool(terminate_on_hold)
         self.turn_requires_cast = bool(turn_requires_cast)
         self.turn_window_steps = int(max(1, turn_window_steps))
 
-        # action = [v_cmd, omega_cmd, cast_gate]
+        # action = [v_cmd, omega_cmd, cast_cmd]
         self.action_space = spaces.Box(
             low=np.array([self.v_min, -self.omega_max, 0.0], dtype=np.float32),
             high=np.array([self.v_max, self.omega_max, 1.0], dtype=np.float32),
@@ -99,10 +117,13 @@ class OdorHoldEnvV4(gym.Env):
 
         self.in_cast = False
         self.cast_phase = 0
+        self._last_cast_delta = 0.0
         self.turn_steps_left = 0
         self._scan_dirs = np.array([np.pi / 2, -np.pi / 2], dtype=np.float32)
         self._scan_seq = (0, 1, 0, 1)
         self._scan_c = np.zeros(4, dtype=np.float32)
+        self.goal_hold_count = 0
+        self.prev_in_goal = False
 
         self._sense_pt = None
         self._trail = []
@@ -164,6 +185,9 @@ class OdorHoldEnvV4(gym.Env):
 
         self.cast_phase += 1
         if self.cast_phase >= 4:
+            meanL = float((self._scan_c[0] + self._scan_c[2]) * 0.5)
+            meanR = float((self._scan_c[1] + self._scan_c[3]) * 0.5)
+            self._last_cast_delta = meanL - meanR
             self.in_cast = False
             self.cast_phase = 0
             self._scan_c[:] = 0.0
@@ -193,8 +217,11 @@ class OdorHoldEnvV4(gym.Env):
         self._step = 0
         self.in_cast = False
         self.cast_phase = 0
+        self._last_cast_delta = 0.0
         self.turn_steps_left = 0
         self._scan_c[:] = 0.0
+        self.goal_hold_count = 0
+        self.prev_in_goal = False
         self._trail = [(self.x, self.y)]
 
         c0 = self._sense(0.0)
@@ -203,6 +230,8 @@ class OdorHoldEnvV4(gym.Env):
 
     def step(self, action):
         self._step += 1
+        prev_c = float(self._last_obs[0])
+        prev_in_goal = bool(self.prev_in_goal)
         a = np.asarray(action, dtype=np.float32)
         a = np.clip(a, self.action_space.low, self.action_space.high)
         v_cmd = float(a[0])
@@ -210,6 +239,7 @@ class OdorHoldEnvV4(gym.Env):
         cast_cmd = int(np.rint(np.clip(a[2], 0.0, 1.0)))
 
         did_cast = False
+        cast_started = False
         can_turn_now = (not self.turn_requires_cast) or (self.turn_steps_left > 0)
 
         if self.in_cast:
@@ -221,6 +251,7 @@ class OdorHoldEnvV4(gym.Env):
             self.in_cast = True
             self.cast_phase = 0
             self._scan_c[:] = 0.0
+            cast_started = True
             c = self._cast_step()
             self.v = 0.0
             self.omega = 0.0
@@ -251,27 +282,60 @@ class OdorHoldEnvV4(gym.Env):
 
         dx, dy = self.x - self.src_x, self.y - self.src_y
         d = np.hypot(dx, dy)
-
-        r = np.exp(-d / self.sigma_r)
-        if d < self.r_goal:
-            r += self.b_hold
-        if did_cast:
-            r -= self.cast_penalty
+        in_goal = bool(d < self.r_goal)
+        if in_goal:
+            self.goal_hold_count += 1
         else:
-            r -= self.control_penalty * (abs(self.v) / (self.v_max + 1e-6))
-            r -= self.turn_penalty * (abs(self.omega) / (self.omega_max + 1e-6))
+            self.goal_hold_count = 0
+        goal_exited = bool((not in_goal) and prev_in_goal)
+        success_hold = bool(self.goal_hold_count >= self.goal_hold_steps)
+        self.prev_in_goal = in_goal
+
+        if self.reward_mode == "bio":
+            delta_c = float(c - prev_c)
+            r = self.odor_abs_weight * float(c)
+            r += self.odor_delta_weight * delta_c
+            if did_cast:
+                r -= self.cast_penalty
+                if (not self.in_cast) and self.cast_phase == 0:
+                    r += self.cast_info_bonus * abs(self._last_cast_delta)
+            else:
+                r -= self.control_penalty * (abs(self.v) / (self.v_max + 1e-6))
+                r -= self.turn_penalty * (abs(self.omega) / (self.omega_max + 1e-6))
+            if in_goal:
+                r += self.b_hold
+            if goal_exited:
+                r -= self.goal_exit_penalty
+            if success_hold:
+                r += self.goal_complete_bonus
+        else:
+            r = np.exp(-d / self.sigma_r)
+            if in_goal:
+                r += self.b_hold
+            if did_cast:
+                r -= self.cast_penalty
+            else:
+                r -= self.control_penalty * (abs(self.v) / (self.v_max + 1e-6))
+                r -= self.turn_penalty * (abs(self.omega) / (self.omega_max + 1e-6))
         if oob:
             r -= self.b_oob
+        if self.terminate_on_hold and success_hold:
+            terminated = True
 
         info = {
             "d": d,
             "c": float(c),
-            "in_goal": int(d < self.r_goal),
+            "in_goal": int(in_goal),
+            "goal_hold_count": int(self.goal_hold_count),
+            "goal_exited": int(goal_exited),
+            "success_hold": int(success_hold),
+            "delta_c": float(c - prev_c),
             "src_x": self.src_x,
             "src_y": self.src_y,
             "v": self.v,
             "omega": self.omega,
             "did_cast": int(did_cast),
+            "cast_start": int(cast_started),
             "cast_cmd": cast_cmd,
             "in_cast": int(self.in_cast),
             "can_turn": int(can_turn_now),

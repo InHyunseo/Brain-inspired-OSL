@@ -20,8 +20,11 @@ def load_config(run_dir):
 
 def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
     trajectories = []
-    success_count = 0
-    cast_counts = []
+    success_entry_count = 0
+    success_hold_count = 0
+    final_in_goal_count = 0
+    cast_start_counts = []
+    cast_step_counts = []
     cast_step_ratios = []
     can_turn_ratios = []
     for i in range(episodes):
@@ -31,7 +34,10 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
         xs, ys = [env.x], [env.y]
         ep_ret = 0.0
         in_goal = False
-        cast_count = 0
+        hold_success = False
+        final_in_goal = False
+        cast_start_count = 0
+        cast_step_count = 0
         cast_steps = 0
         can_turn_steps = 0
         total_steps = 0
@@ -44,7 +50,8 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
             obs, r, term, trunc, info = env.step(action)
             done = term or trunc
             total_steps += 1
-            cast_count += int(info.get("did_cast", 0))
+            cast_start_count += int(info.get("cast_start", 0))
+            cast_step_count += int(info.get("did_cast", 0))
             cast_steps += int(info.get("in_cast", 0))
             can_turn_steps += int(info.get("can_turn", 0))
             xs.append(env.x)
@@ -52,10 +59,18 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
             ep_ret += r
             if info.get("in_goal", 0):
                 in_goal = True
+            if info.get("success_hold", 0):
+                hold_success = True
+            final_in_goal = bool(info.get("in_goal", 0))
 
         if in_goal:
-            success_count += 1
-        cast_counts.append(float(cast_count))
+            success_entry_count += 1
+        if hold_success:
+            success_hold_count += 1
+        if final_in_goal:
+            final_in_goal_count += 1
+        cast_start_counts.append(float(cast_start_count))
+        cast_step_counts.append(float(cast_step_count))
         if total_steps > 0:
             cast_step_ratios.append(float(cast_steps) / float(total_steps))
             can_turn_ratios.append(float(can_turn_steps) / float(total_steps))
@@ -64,11 +79,15 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
             can_turn_ratios.append(0.0)
         trajectories.append({"return": ep_ret, "success": in_goal, "x": xs, "y": ys})
     stats = {
-        "cast_count_mean": float(np.mean(cast_counts)) if cast_counts else 0.0,
+        "success_entry_rate": float(success_entry_count / episodes) if episodes > 0 else 0.0,
+        "success_hold_rate": float(success_hold_count / episodes) if episodes > 0 else 0.0,
+        "final_in_goal_rate": float(final_in_goal_count / episodes) if episodes > 0 else 0.0,
+        "cast_start_count_mean": float(np.mean(cast_start_counts)) if cast_start_counts else 0.0,
+        "cast_step_count_mean": float(np.mean(cast_step_counts)) if cast_step_counts else 0.0,
         "cast_step_ratio_mean": float(np.mean(cast_step_ratios)) if cast_step_ratios else 0.0,
         "can_turn_ratio_mean": float(np.mean(can_turn_ratios)) if can_turn_ratios else 0.0,
     }
-    return trajectories, success_count, stats
+    return trajectories, stats
 
 def evaluate(args):
     conf = load_config(args.run_dir)
@@ -87,6 +106,18 @@ def evaluate(args):
         'sigma_c': conf.get('sigma_c', 1.0),
         'r_goal': conf.get('r_goal', 0.35),
     }
+    if str(conf.get("env_id", "OdorHold-v3")).endswith("-v4"):
+        env_kwargs.update({
+            'reward_mode': conf.get('reward_mode', 'dense'),
+            'cast_penalty': conf.get('cast_penalty', 0.01),
+            'odor_abs_weight': conf.get('odor_abs_weight', 0.0),
+            'odor_delta_weight': conf.get('odor_delta_weight', 1.0),
+            'cast_info_bonus': conf.get('cast_info_bonus', 0.0),
+            'goal_hold_steps': conf.get('goal_hold_steps', 20),
+            'goal_complete_bonus': conf.get('goal_complete_bonus', 1.0),
+            'goal_exit_penalty': conf.get('goal_exit_penalty', 0.3),
+            'terminate_on_hold': conf.get('terminate_on_hold', True),
+        })
     
     # 1. Trajectory Eval Env
     env_id = conf.get("env_id", "OdorHold-v3")
@@ -128,6 +159,7 @@ def evaluate(args):
             gamma=conf.get("gamma", 0.99),
             tau=conf.get("tau", 0.005),
             cell_type=conf.get("rnn_cell", "gru"),
+            critic_type=conf.get("critic_type", "recurrent"),
         )
 
     ckpt_name = args.ckpt
@@ -145,14 +177,15 @@ def evaluate(args):
 
     # --- Metrics Evaluation ---
     print(f"[Info] Starting evaluation over {args.episodes} episodes...")
-    trajectories, success_count, rollout_stats = _rollout_trajectories(env, agent, agent_type, args.episodes, args.seed_base)
-
-    success_rate = success_count / args.episodes
+    trajectories, rollout_stats = _rollout_trajectories(env, agent, agent_type, args.episodes, args.seed_base)
     avg_return = np.mean([t['return'] for t in trajectories])
     
-    print(f"  > Success Rate: {success_rate * 100:.1f}%")
+    print(f"  > Entry Success: {rollout_stats['success_entry_rate'] * 100:.1f}%")
+    print(f"  > Hold Success:  {rollout_stats['success_hold_rate'] * 100:.1f}%")
+    print(f"  > Final In-Goal: {rollout_stats['final_in_goal_rate'] * 100:.1f}%")
     print(f"  > Avg Return:   {avg_return:.2f}")
-    print(f"  > Avg Cast Cnt: {rollout_stats['cast_count_mean']:.2f} / episode")
+    print(f"  > Avg Cast Starts: {rollout_stats['cast_start_count_mean']:.2f} / episode")
+    print(f"  > Avg Cast Steps:  {rollout_stats['cast_step_count_mean']:.2f} / episode")
     print(f"  > Cast Step %:  {rollout_stats['cast_step_ratio_mean'] * 100:.1f}%")
     print(f"  > Can-Turn %:   {rollout_stats['can_turn_ratio_mean'] * 100:.1f}%")
 
@@ -235,7 +268,7 @@ def evaluate(args):
                 print(f"[Warn] milestone load failed ({label}): {e}")
                 continue
             env_m = env_cls(**env_kwargs)
-            traj_i, _, _ = _rollout_trajectories(env_m, agent, agent_type, args.episodes, args.seed_base)
+            traj_i, _ = _rollout_trajectories(env_m, agent, agent_type, args.episodes, args.seed_base)
             env_m.close()
             ep_text = f"ep={ep_i}" if ep_i >= 1 else "ep=unknown"
             title_i = f"Eval {label} ({ep_text})"

@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--rnn-cell", choices=["gru", "rnn"], default="gru")
+    parser.add_argument("--critic-type", choices=["recurrent", "mlp"], default="recurrent")
     parser.add_argument("--rnn-hidden", type=int, default=147)
     parser.add_argument("--dqn-hidden", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -51,6 +52,15 @@ def main():
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
     parser.add_argument("--sigma-c", type=float, default=1.0)
+    parser.add_argument("--reward-mode", choices=["dense", "bio"], default="bio")
+    parser.add_argument("--cast-penalty", type=float, default=0.01)
+    parser.add_argument("--odor-abs-weight", type=float, default=0.0)
+    parser.add_argument("--odor-delta-weight", type=float, default=1.0)
+    parser.add_argument("--cast-info-bonus", type=float, default=0.0)
+    parser.add_argument("--goal-hold-steps", type=int, default=20)
+    parser.add_argument("--goal-complete-bonus", type=float, default=1.0)
+    parser.add_argument("--goal-exit-penalty", type=float, default=0.3)
+    parser.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
 
     # [Eval/Plot 관련]
     parser.add_argument("--eval-episodes", type=int, default=10, help="Number of episodes for evaluation")

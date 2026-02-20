@@ -1,46 +1,32 @@
-# Odor Source Localization Research (Brain-Inspired RL)
+# Odor Source Localization (Brain-Inspired RL)
 
-이 저장소는 단일 농도 센서 기반의 active sensing 후각 탐색을,
-뇌영감(connectome/도파민 예측오차 해석) 관점에서 강화학습으로 검증하는 연구 코드입니다.
+단일 농도 센서 기반 odor source localization/holding 문제를,
+brain-inspired 관점(부분관측, active sensing, prediction error 해석)으로 실험하는 코드베이스입니다.
 
-## Research Goal
-- 단일 센서 + 부분관측 환경에서 source localization/holding 달성
-- 행동 레벨에서 active sensing(casting)이 학습되는지 검증
-- TD error를 도파민성 prediction-error의 계산적 대응(computational analogue)로 해석
-- 최종적으로 connectome 제약(masked recurrent core)과 성능/행동 패턴의 관계 분석
+## Research Focus
+- 단일 센서 + 부분관측 환경에서 안정적인 source 탐색/유지
+- active sensing(casting) 행동의 학습 여부 검증
+- actor-critic의 critic TD error를 dopamine-like prediction error의 computational analogue로 해석
+- 이후 connectome 제약(masked recurrent core)으로 확장
 
-## Current Status
-- Baseline: `DRQN/DQN + OdorHold-v3` 유지됨
-- New path: `RSAC + OdorHold-v4` 추가됨
-- `OdorHold-v4`는 하이브리드 action 사용
-  - `action = [v_cmd, omega_cmd, cast_cmd]`
-  - `cast_cmd`는 정책이 Bernoulli로 샘플링
-  - cast 중에는 v3 스타일 고정 샘플링(`L/R/L/R`, 정지)
-- 관측은 v3 스타일 1-step 유지
-  - `obs = [c, mode]` (`mode: 0=run, 1=cast`)
+## Current Implementations
+- `OdorHold-v3` + `DRQN/DQN`
+  - 이산 action 기반 기존 baseline
+- `OdorHold-v4` + `RSAC` (Recurrent SAC, hybrid action)
+  - action: `[v_cmd, omega_cmd, cast_cmd]`
+  - cast 시작은 정책이 결정, cast 중에는 v3 스타일 고정 샘플링(`L/R/L/R`, 정지)
+  - 기본 설정은 hard constraint(`cast` 이후에만 turn 허용)
 
-## Recommended Experimental Order
-1. v3 baseline 성능 고정 (success, return, step-to-goal)
-2. v4 + RSAC 학습 안정화
-3. `GRU vs vanilla RNN` ablation (`--rnn-cell gru|rnn`)
-4. connectome mask 삽입 실험
+## Current Workflow
+1. hard-constraint + GRU로 수렴 baseline 확보
+2. GRU 안정화 후 soft constraint 실험
+3. `GRU vs vanilla RNN` ablation
+4. connectome mask 삽입
 
-## Key Hypotheses
-- 불확실 구간에서 cast 선택 빈도가 증가한다.
-- cast를 막으면 성공률/도달시간이 악화된다.
-- recurrent cell 종류와 connectome 제약이 active sensing 패턴에 영향을 준다.
-
-## Metrics to Track
-- Task: success rate, avg return, reach step
-- Behavior: cast rate, cast burst length, 경로 길이/진동, |omega|
-- Learning: TD error 통계, alpha(entropy temperature), Q 분포
-
-## Document Map
-- 실행/인자/출력 구조 매뉴얼: `MANUAL.md`
-- 코드 엔트리포인트: `main.py`, `train.py`, `eval.py`
-- 환경: `src/envs/odor_env.py`, `src/envs/odor_env_v4.py`
-- 모델: `src/models/networks.py`
-- 에이전트: `src/agents/`
+## Key Metrics
+- Task: success rate, avg return, step-to-goal
+- Behavior: cast start count, cast step ratio, turn-available ratio, trajectory shape
+- Learning: TD error, alpha(entropy temperature), critic/actor loss trend
 
 ## Quick Start
 ```bash
@@ -48,3 +34,6 @@ cd ~/osl_project
 python3 main.py --agent-type rsac --env-id OdorHold-v4 --total-episodes 20000
 ```
 
+## Documents
+- 실행/옵션/출력 구조: `MANUAL.md`
+- 진입점: `main.py`, `train.py`, `eval.py`, `replot.py`

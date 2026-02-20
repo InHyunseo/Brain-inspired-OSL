@@ -106,6 +106,31 @@ class RecurrentQCritic(nn.Module):
         return q, h2
 
 
+class MLPQCritic(nn.Module):
+    """
+    Non-recurrent Q critic with the same call signature as RecurrentQCritic.
+    Returns (q, None) so RSAC code path can stay unchanged.
+    """
+    def __init__(self, obs_dim, act_dim, hidden=147, cell_type="gru"):
+        super().__init__()
+        del cell_type  # kept for constructor compatibility
+        self.fc1 = nn.Linear(obs_dim + act_dim, hidden)
+        self.fc2 = nn.Linear(hidden, hidden)
+        self.q = nn.Linear(hidden, 1)
+
+    def forward(self, obs, act, h=None):
+        del h
+        if obs.dim() == 2:
+            obs = obs.unsqueeze(1)
+        if act.dim() == 2:
+            act = act.unsqueeze(1)
+        z = torch.cat([obs, act], dim=-1)
+        z = F.relu(self.fc1(z))
+        z = F.relu(self.fc2(z))
+        q = self.q(z).squeeze(-1)
+        return q, None
+
+
 class RecurrentHybridActor(nn.Module):
     """
     Hybrid policy for [v, omega, cast]:
