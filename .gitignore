@@ -17,3 +17,5 @@ data/
 *.mp4
 *.png
 *.gif
+*.pt
+runs/

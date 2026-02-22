@@ -134,11 +134,13 @@ def train(args):
                     action, h_next = agent.get_action(obs, h, epsilon)
                 next_obs, reward, term, trunc, info = env.step(action)
                 done = bool(term or trunc)
+                # Bootstrap should stop only on true terminal states, not time-limit truncation.
+                terminal = float(term)
                 step_count += 1
                 if first_goal_step is None and info.get("in_goal", 0):
                     first_goal_step = step_count
                 
-                traj.append((obs, action, float(reward), next_obs, float(done)))
+                traj.append((obs, action, float(reward), next_obs, terminal))
                 obs = next_obs
                 h = h_next
                 ep_ret += reward

@@ -8,7 +8,7 @@ class EpisodeReplayBuffer:
         self.n_steps = 0
 
     def add_episode(self, ep):
-        """ep: list of (obs, action, reward, next_obs, done)"""
+        """ep: list of (obs, action, reward, next_obs, terminal)."""
         if not ep: return
         self.episodes.append(ep)
         self.n_steps += len(ep)
@@ -24,7 +24,7 @@ class EpisodeReplayBuffer:
         if not candidates:
             raise RuntimeError("Buffer insufficient for sampling sequences.")
 
-        obs_seqs, act_seqs, rew_seqs, done_seqs = [], [], [], []
+        obs_seqs, act_seqs, rew_seqs, terminal_seqs = [], [], [], []
 
         for _ in range(batch_size):
             ep = random.choice(candidates)
@@ -37,13 +37,13 @@ class EpisodeReplayBuffer:
             obs_seqs.append(np.asarray(obs_seq, dtype=np.float32))
             act_seqs.append(np.asarray([tr[1] for tr in chunk], dtype=np.int64))
             rew_seqs.append(np.asarray([tr[2] for tr in chunk], dtype=np.float32))
-            done_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
+            terminal_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
 
         return (
             np.stack(obs_seqs, axis=0),
             np.stack(act_seqs, axis=0),
             np.stack(rew_seqs, axis=0),
-            np.stack(done_seqs, axis=0),
+            np.stack(terminal_seqs, axis=0),
         )
 
     def sample_continuous(self, batch_size, seq_len):
@@ -51,7 +51,7 @@ class EpisodeReplayBuffer:
         if not candidates:
             raise RuntimeError("Buffer insufficient for sampling sequences.")
 
-        obs_seqs, act_seqs, rew_seqs, done_seqs = [], [], [], []
+        obs_seqs, act_seqs, rew_seqs, terminal_seqs = [], [], [], []
 
         for _ in range(batch_size):
             ep = random.choice(candidates)
@@ -64,11 +64,11 @@ class EpisodeReplayBuffer:
             obs_seqs.append(np.asarray(obs_seq, dtype=np.float32))
             act_seqs.append(np.asarray([tr[1] for tr in chunk], dtype=np.float32))
             rew_seqs.append(np.asarray([tr[2] for tr in chunk], dtype=np.float32))
-            done_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
+            terminal_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
 
         return (
             np.stack(obs_seqs, axis=0),
             np.stack(act_seqs, axis=0),
             np.stack(rew_seqs, axis=0),
-            np.stack(done_seqs, axis=0),
+            np.stack(terminal_seqs, axis=0),
         )

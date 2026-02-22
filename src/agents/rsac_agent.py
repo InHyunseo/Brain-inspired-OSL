@@ -27,11 +27,13 @@ class RSACAgent:
         self.gamma = float(gamma)
         self.tau = float(tau)
         self.act_dim = int(act_dim)
-        if self.act_dim < 3:
-            raise ValueError("RSACAgent expects hybrid action dim 3: [v, omega, cast].")
+        if self.act_dim != 3:
+            raise ValueError("RSACAgent expects action dim exactly 3: [v, omega, cast].")
 
         self.action_low = torch.as_tensor(action_low, dtype=torch.float32, device=device)
         self.action_high = torch.as_tensor(action_high, dtype=torch.float32, device=device)
+        if self.action_low.numel() != 3 or self.action_high.numel() != 3:
+            raise ValueError("RSACAgent expects action bounds with 3 elements: [v, omega, cast].")
         self.critic_type = str(critic_type).lower()
         if self.critic_type not in ("recurrent", "mlp"):
             raise ValueError("critic_type must be one of ['recurrent', 'mlp']")
@@ -56,7 +58,10 @@ class RSACAgent:
 
         self.log_alpha = torch.zeros(1, device=device, requires_grad=True)
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr_alpha)
-        self.target_entropy = -float(act_dim)*0.5
+        # Hybrid entropy target:
+        # - continuous [v, omega]: SAC default ~= -dim_cont
+        # - binary cast action: -0.5 * log(2) (encourages some stochasticity without dominating)
+        self.target_entropy = -(2.0 + 0.5 * float(np.log(2.0)))
 
         self.loss_fn = nn.SmoothL1Loss()
 
@@ -80,12 +85,12 @@ class RSACAgent:
         return a, h2
 
     def update(self, batch):
-        obs_seq, act_seq, rew_seq, done_seq = batch
+        obs_seq, act_seq, rew_seq, terminal_seq = batch
 
         obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)    # (B, T+1, D)
         act_seq = torch.as_tensor(act_seq, dtype=torch.float32, device=self.device)    # (B, T, A)
         rew_seq = torch.as_tensor(rew_seq, dtype=torch.float32, device=self.device)    # (B, T)
-        done_seq = torch.as_tensor(done_seq, dtype=torch.float32, device=self.device)  # (B, T)
+        terminal_seq = torch.as_tensor(terminal_seq, dtype=torch.float32, device=self.device)  # (B, T)
 
         obs_t = obs_seq[:, :-1, :]
         next_obs_t = obs_seq[:, 1:, :]
@@ -95,7 +100,7 @@ class RSACAgent:
             next_q1, _ = self.tq1(next_obs_t, next_a, None)
             next_q2, _ = self.tq2(next_obs_t, next_a, None)
             next_q = torch.min(next_q1, next_q2) - self.alpha.detach() * next_logp
-            y = rew_seq + self.gamma * (1.0 - done_seq) * next_q
+            y = rew_seq + self.gamma * (1.0 - terminal_seq) * next_q
 
         q1, _ = self.q1(obs_t, act_seq, None)
         q2, _ = self.q2(obs_t, act_seq, None)

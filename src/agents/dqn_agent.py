@@ -40,18 +40,18 @@ class DQNAgent:
         return int(torch.argmax(qvals, dim=1).item()), None
 
     def update(self, batch):
-        obs_seq, act_seq, rew_seq, done_seq = batch
+        obs_seq, act_seq, rew_seq, terminal_seq = batch
 
         obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)   # (B, T+1, D)
         act_seq = torch.as_tensor(act_seq, dtype=torch.int64, device=self.device)     # (B, T)
         rew_seq = torch.as_tensor(rew_seq, dtype=torch.float32, device=self.device)   # (B, T)
-        done_seq = torch.as_tensor(done_seq, dtype=torch.float32, device=self.device) # (B, T)
+        terminal_seq = torch.as_tensor(terminal_seq, dtype=torch.float32, device=self.device) # (B, T)
 
         obs_t = obs_seq[:, :-1, :].reshape(-1, obs_seq.shape[-1])
         next_obs_t = obs_seq[:, 1:, :].reshape(-1, obs_seq.shape[-1])
         act_t = act_seq.reshape(-1)
         rew_t = rew_seq.reshape(-1)
-        done_t = done_seq.reshape(-1)
+        terminal_t = terminal_seq.reshape(-1)
 
         q_all = self.q(obs_t)
         qsa = q_all.gather(1, act_t.unsqueeze(-1)).squeeze(-1)
@@ -59,7 +59,7 @@ class DQNAgent:
         with torch.no_grad():
             next_a = torch.argmax(self.q(next_obs_t), dim=1, keepdim=True)
             next_q = self.tq(next_obs_t).gather(1, next_a).squeeze(-1)
-            y = rew_t + self.gamma * (1.0 - done_t) * next_q
+            y = rew_t + self.gamma * (1.0 - terminal_t) * next_q
 
         loss = self.loss_fn(qsa, y)
         self.optimizer.zero_grad()

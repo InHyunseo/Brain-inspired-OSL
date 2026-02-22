@@ -31,12 +31,12 @@ class DRQNAgent:
             return int(torch.argmax(qvals, dim=1).item()), h2
 
     def update(self, batch):
-        obs_seq, act_seq, rew_seq, done_seq = batch
+        obs_seq, act_seq, rew_seq, terminal_seq = batch
         
         obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)   # (B, T+1, D)
         act_seq = torch.as_tensor(act_seq, dtype=torch.int64, device=self.device)     # (B, T)
         rew_seq = torch.as_tensor(rew_seq, dtype=torch.float32, device=self.device)   # (B, T)
-        done_seq = torch.as_tensor(done_seq, dtype=torch.float32, device=self.device) # (B, T)
+        terminal_seq = torch.as_tensor(terminal_seq, dtype=torch.float32, device=self.device) # (B, T)
 
         # Current Q
         q_all, _ = self.q(obs_seq, None) # (B, T+1, A)
@@ -47,7 +47,7 @@ class DRQNAgent:
             tq_all, _ = self.tq(obs_seq, None)
             next_a = torch.argmax(q_all[:, 1:, :], dim=2, keepdim=True)
             next_q = tq_all[:, 1:, :].gather(2, next_a).squeeze(-1)
-            y = rew_seq + self.gamma * (1.0 - done_seq) * next_q
+            y = rew_seq + self.gamma * (1.0 - terminal_seq) * next_q
 
         loss = self.loss_fn(qsa, y)
 

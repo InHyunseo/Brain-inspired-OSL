@@ -92,7 +92,8 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
 
 def evaluate(args):
     conf = load_config(args.run_dir)
-    seed = int(getattr(args, "seed", conf.get("seed", 0)))
+    seed_arg = getattr(args, "seed", None)
+    seed = int(conf.get("seed", 0) if seed_arg is None else seed_arg)
     set_global_seed(seed)
     device = torch.device("cpu") if args.force_cpu else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Info] Evaluating on {device}")
