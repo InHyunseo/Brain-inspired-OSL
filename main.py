@@ -41,15 +41,14 @@ def main():
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--first-milestone-ep", type=int, default=100)
-    parser.add_argument("--milestone-every", type=int, default=10)
     
     # Env params
     parser.add_argument("--src-x", type=float, default=0.0)
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
     parser.add_argument("--sigma-c", type=float, default=1.0)
-    parser.add_argument("--reward-mode", choices=["dense", "bio"], default="bio")
-    parser.add_argument("--cast-penalty", type=float, default=0.03)
+    parser.add_argument("--reward-mode", choices=["dense", "bio"], default="dense")
+    parser.add_argument("--cast-penalty", type=float, default=0.02)
     parser.add_argument("--odor-abs-weight", type=float, default=0.0)
     parser.add_argument("--odor-delta-weight", type=float, default=1.0)
     parser.add_argument("--cast-info-bonus", type=float, default=0.0)
