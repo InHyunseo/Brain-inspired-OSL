@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
     parser.add_argument("--sigma-c", type=float, default=1.0)
+    parser.add_argument("--spawn-mode", choices=["legacy", "balanced"], default="balanced")
     parser.add_argument("--reward-mode", choices=["dense", "bio"], default="dense")
     parser.add_argument("--cast-penalty", type=float, default=0.02)
     parser.add_argument("--odor-abs-weight", type=float, default=0.0)

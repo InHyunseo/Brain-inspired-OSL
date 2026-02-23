@@ -66,6 +66,10 @@ def train(args):
             goal_exit_penalty=getattr(args, "goal_exit_penalty", 0.3),
             terminate_on_hold=getattr(args, "terminate_on_hold", True),
         )
+    else:
+        env_kwargs.update(
+            spawn_mode=getattr(args, "spawn_mode", "balanced"),
+        )
     env = make_env(args.env_id, **env_kwargs)
     env.action_space.seed(args.seed)
     if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
@@ -258,6 +262,7 @@ if __name__ == "__main__":
     p.add_argument("--src-y", type=float, default=0.0)
     p.add_argument("--wind-x", type=float, default=0.0)
     p.add_argument("--sigma-c", type=float, default=1.0)
+    p.add_argument("--spawn-mode", choices=["legacy", "balanced"], default="balanced")
     p.add_argument("--reward-mode", choices=["dense", "bio"], default="bio")
     p.add_argument("--cast-penalty", type=float, default=0.01)
     p.add_argument("--odor-abs-weight", type=float, default=0.0)

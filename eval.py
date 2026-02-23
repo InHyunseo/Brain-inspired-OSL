@@ -99,6 +99,7 @@ def evaluate(args):
     print(f"[Info] Evaluating on {device}")
 
     # Env Params Restore
+    env_id = conf.get("env_id", "OdorHold-v3")
     env_kwargs = {
         'L': conf.get('L', 3.0),
         'dt': conf.get('dt', 0.1),
@@ -110,7 +111,7 @@ def evaluate(args):
         'sigma_c': conf.get('sigma_c', 1.0),
         'r_goal': conf.get('r_goal', 0.35),
     }
-    if str(conf.get("env_id", "OdorHold-v3")).endswith("-v4"):
+    if str(env_id).endswith("-v4"):
         env_kwargs.update({
             'reward_mode': conf.get('reward_mode', 'dense'),
             'cast_penalty': conf.get('cast_penalty', 0.01),
@@ -122,9 +123,12 @@ def evaluate(args):
             'goal_exit_penalty': conf.get('goal_exit_penalty', 0.3),
             'terminate_on_hold': conf.get('terminate_on_hold', True),
         })
+    else:
+        env_kwargs.update({
+            'spawn_mode': conf.get('spawn_mode', 'legacy'),
+        })
     
     # 1. Trajectory Eval Env
-    env_id = conf.get("env_id", "OdorHold-v3")
     env_cls = OdorHoldEnvV4 if str(env_id).endswith("-v4") else OdorHoldEnv
     env = env_cls(**env_kwargs)
     env.action_space.seed(seed)
