@@ -43,11 +43,14 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 ## Main Arguments (`main.py`)
 - `--env-id`: default `OdorHold-v3`
 - `--agent-type`: `drqn | dqn | rsac` (default `drqn`)
-- `--total-episodes`: default `600`
+- `--total-episodes`: default `20000`
 - `--seed`: default `42`
 - `--force-cpu`
-- `--spawn-mode`: `legacy | balanced` (default `balanced`, v3 전용)
 - `--reward-mode`: `mechanical | bio` (default `mechanical`)
+- `--cast-penalty`: default `0.02`
+- `--turn-penalty`: default `0.01`
+- `--goal-hold-steps`: default `20`
+- `--terminate-on-hold` / `--no-terminate-on-hold` (default terminate)
 
 ### RSAC-related
 - `--lr-actor`: default `3e-4`
@@ -55,28 +58,25 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `--lr-alpha`: default `3e-4`
 - `--gamma`: default `0.99`
 - `--tau`: default `0.005`
-- `--rnn-cell`: `gru | rnn` (default `gru`)
 - `--rnn-hidden`: default `147`
 - `--batch-size`: default `128`
 - `--seq-len`: default `16`
 - `--buffer-size`: default `150000`
 - `--learning-starts`: default `5000`
 
-### Milestone / Eval
-- `--save-milestones` / `--no-save-milestones` (default save)
-- `--milestone-every`: default `10`
-- `--eval-episodes`: default `10`
+### Eval
+- `--eval-episodes`: default `100`
 - `--seed-base`: default `20000`
 - `--save-gif` / `--no-save-gif` (default save)
 - `--plot-milestones` / `--no-plot-milestones` (default plot)
 
 ## Notes
 - `RSAC`에서는 `--eps-start/--eps-end/--eps-decay-steps`가 실질적으로 사용되지 않습니다.
-- `OdorHold-v3`의 `spawn-mode=balanced`는 소스가 경계로 이동할 때 스폰 반경 분포 왜곡을 줄이기 위한 보정 샘플러입니다.
+- `OdorHold-v3`/`OdorHold-v4`의 spawn sampler는 balanced 방식으로 고정되어 있습니다.
 - `OdorHold-v4`의 `reward-mode=mechanical`은 전통 RL shaping(거리 기반 + 행동비용)입니다.
 - `OdorHold-v4`의 `reward-mode=bio`는 mechanical과 동일한 보상 구조에서 거리 shaping(`exp(-d/sigma_r)`)만 농도 shaping(`c`)으로 바꿉니다.
 - `goal/hold` 판정(`d < r_goal`)과 종료 조건은 `mechanical`/`bio` 공통입니다.
-- `first.pt`는 `ep100`에서 생성되며, 이후 중간 체크포인트는 `ep100`부터 `milestone-every` 주기에 맞춰 저장됩니다.
+- `first.pt`는 `ep100`에서 생성되며, `mid.pt`는 `best.pt`와 `first.pt` 사이 중간 시점에 가장 가까운 스냅샷으로 저장됩니다.
 - 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
 
 ## Output Structure
@@ -85,8 +85,8 @@ runs/{agent}_main_YYYYMMDD_HHMMSS/
 ├── checkpoints/
 │   ├── best.pt
 │   ├── final.pt
-│   ├── first.pt                # save-milestones일 때
-│   └── mid.pt                  # save-milestones일 때
+│   ├── first.pt
+│   └── mid.pt
 ├── plots/
 │   ├── returns.png
 │   ├── steps_to_goal.png
@@ -98,7 +98,7 @@ runs/{agent}_main_YYYYMMDD_HHMMSS/
 │   ├── training_metrics.json
 │   ├── returns.csv
 │   ├── steps_to_goal.csv
-│   └── milestones.json         # save-milestones일 때
+│   └── milestones.json
 └── config.json
 ```
 

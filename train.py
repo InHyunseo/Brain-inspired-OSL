@@ -29,17 +29,15 @@ def make_env(env_id, **kwargs):
 def train(args):
     set_global_seed(args.seed)
     first_milestone_ep = 100
+    mid_snapshot_every = 10
 
     # 1. Setup
     run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.out_dir, run_name)
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
-    tmp_mid_dir = None
-    tmp_mid_ctx = None
-    if args.save_milestones:
-        tmp_mid_ctx = tempfile.TemporaryDirectory(prefix=f"{run_name}_mid_", dir="/tmp")
-        tmp_mid_dir = tmp_mid_ctx.name
+    tmp_mid_ctx = tempfile.TemporaryDirectory(prefix=f"{run_name}_mid_", dir="/tmp")
+    tmp_mid_dir = tmp_mid_ctx.name
     
     device = torch.device("cuda" if torch.cuda.is_available() and not args.force_cpu else "cpu")
     
@@ -57,15 +55,10 @@ def train(args):
     if str(args.env_id).endswith("-v4"):
         env_kwargs.update(
             reward_mode=getattr(args, "reward_mode", "mechanical"),
-            cast_penalty=getattr(args, "cast_penalty", 0.01),
+            cast_penalty=getattr(args, "cast_penalty", 0.02),
+            turn_penalty=getattr(args, "turn_penalty", 0.01),
             goal_hold_steps=getattr(args, "goal_hold_steps", 20),
-            goal_complete_bonus=getattr(args, "goal_complete_bonus", 1.0),
-            goal_exit_penalty=getattr(args, "goal_exit_penalty", 0.3),
             terminate_on_hold=getattr(args, "terminate_on_hold", True),
-        )
-    else:
-        env_kwargs.update(
-            spawn_mode=getattr(args, "spawn_mode", "balanced"),
         )
     env = make_env(args.env_id, **env_kwargs)
     env.action_space.seed(args.seed)
@@ -100,8 +93,6 @@ def train(args):
             lr_alpha=args.lr_alpha,
             gamma=args.gamma,
             tau=args.tau,
-            cell_type=args.rnn_cell,
-            critic_type=getattr(args, "critic_type", "recurrent"),
         )
     buffer = EpisodeReplayBuffer(args.buffer_size)
 
@@ -165,14 +156,12 @@ def train(args):
                 best_ep = ep
                 agent.save(os.path.join(ckpt_dir, "best.pt"))
 
-            if args.save_milestones and ep == first_milestone_ep:
+            if ep == first_milestone_ep:
                 agent.save(os.path.join(ckpt_dir, "first.pt"))
 
             if (
-                args.save_milestones
-                and tmp_mid_dir is not None
-                and ep >= first_milestone_ep
-                and ep % args.milestone_every == 0
+                ep >= first_milestone_ep
+                and ep % mid_snapshot_every == 0
             ):
                 pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
                 agent.save(pep)
@@ -196,7 +185,7 @@ def train(args):
         interrupted = True
         print("\n[Warn] Training interrupted. Saving partial artifacts...")
     finally:
-        if args.save_milestones and best_ep > 0:
+        if best_ep > 0:
             first_path = os.path.join(ckpt_dir, "first.pt")
             best_path = os.path.join(ckpt_dir, "best.pt")
 
@@ -210,12 +199,11 @@ def train(args):
             hi = max(ep for ep, _ in cands)
             mid_target = (lo + hi) // 2
 
-            if tmp_mid_dir is not None:
-                for ep in sorted(set(saved_eps)):
-                    if lo <= ep <= hi:
-                        p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                        if os.path.exists(p_ep):
-                            cands.append((int(ep), p_ep))
+            for ep in sorted(set(saved_eps)):
+                if lo <= ep <= hi:
+                    p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
+                    if os.path.exists(p_ep):
+                        cands.append((int(ep), p_ep))
 
             mid_ep, mid_src = min(cands, key=lambda item: abs(item[0] - mid_target))
             shutil.copy2(mid_src, os.path.join(ckpt_dir, "mid.pt"))
@@ -226,13 +214,12 @@ def train(args):
                 "best_ep": int(best_ep),
                 "mid_target_ep": int(mid_target),
                 "mid_saved_ep": int(mid_ep),
-                "milestone_every": int(args.milestone_every),
+                "mid_snapshot_every": int(mid_snapshot_every),
             }
             with open(os.path.join(run_dir, "plot_data", "milestones.json"), "w") as f:
                 json.dump(milestone_meta, f, indent=2)
 
-        if tmp_mid_ctx is not None:
-            tmp_mid_ctx.cleanup()
+        tmp_mid_ctx.cleanup()
 
         if ep_returns:
             plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
@@ -259,18 +246,14 @@ if __name__ == "__main__":
     p.add_argument("--src-y", type=float, default=0.0)
     p.add_argument("--wind-x", type=float, default=0.0)
     p.add_argument("--sigma-c", type=float, default=1.0)
-    p.add_argument("--spawn-mode", choices=["legacy", "balanced"], default="balanced")
-    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
-    p.add_argument("--cast-penalty", type=float, default=0.01)
+    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="mechanical")
+    p.add_argument("--cast-penalty", type=float, default=0.02)
+    p.add_argument("--turn-penalty", type=float, default=0.01)
     p.add_argument("--goal-hold-steps", type=int, default=20)
-    p.add_argument("--goal-complete-bonus", type=float, default=1.0)
-    p.add_argument("--goal-exit-penalty", type=float, default=0.3)
     p.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--tau", type=float, default=0.005)
-    p.add_argument("--rnn-cell", choices=["gru", "rnn"], default="gru")
-    p.add_argument("--critic-type", choices=["recurrent", "mlp"], default="recurrent")
     
     # Hyperparams
     p.add_argument("--buffer-size", type=int, default=150000)
@@ -282,8 +265,6 @@ if __name__ == "__main__":
     p.add_argument("--eps-decay-steps", type=int, default=4000) # episode 단위
     p.add_argument("--log-every", type=int, default=20)
     p.add_argument("--force-cpu", action="store_true")
-    p.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--milestone-every", type=int, default=10)
 
     args = p.parse_args()
     if args.run_name is None:

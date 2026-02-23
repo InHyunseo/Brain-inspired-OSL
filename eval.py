@@ -103,10 +103,9 @@ def evaluate(args):
     env_kwargs = {
         'L': conf.get('L', 3.0),
         'dt': conf.get('dt', 0.1),
-        'v_fixed': conf.get('v_fixed', 0.25),
         'src_x': conf.get('src_x', 0.0),
         'src_y': conf.get('src_y', 0.0),
-        'wind_x': conf.get('wind_x', 1.0),
+        'wind_x': conf.get('wind_x', 0.0),
         'wind_y': conf.get('wind_y', 0.0),
         'sigma_c': conf.get('sigma_c', 1.0),
         'r_goal': conf.get('r_goal', 0.35),
@@ -114,15 +113,14 @@ def evaluate(args):
     if str(env_id).endswith("-v4"):
         env_kwargs.update({
             'reward_mode': conf.get('reward_mode', 'mechanical'),
-            'cast_penalty': conf.get('cast_penalty', 0.01),
+            'cast_penalty': conf.get('cast_penalty', 0.02),
+            'turn_penalty': conf.get('turn_penalty', 0.01),
             'goal_hold_steps': conf.get('goal_hold_steps', 20),
-            'goal_complete_bonus': conf.get('goal_complete_bonus', 1.0),
-            'goal_exit_penalty': conf.get('goal_exit_penalty', 0.3),
             'terminate_on_hold': conf.get('terminate_on_hold', True),
         })
     else:
         env_kwargs.update({
-            'spawn_mode': conf.get('spawn_mode', 'legacy'),
+            'v_fixed': conf.get('v_fixed', 0.25),
         })
     
     # 1. Trajectory Eval Env
@@ -166,8 +164,6 @@ def evaluate(args):
             lr_alpha=conf.get("lr_alpha", 3e-4),
             gamma=conf.get("gamma", 0.99),
             tau=conf.get("tau", 0.005),
-            cell_type=conf.get("rnn_cell", "gru"),
-            critic_type=conf.get("critic_type", "recurrent"),
         )
 
     ckpt_name = args.ckpt

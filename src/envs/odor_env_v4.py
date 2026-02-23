@@ -11,7 +11,6 @@ class OdorHoldEnvV4(gym.Env):
         render_mode=None,
         L=3.0,
         dt=0.1,
-        v_fixed=None,
         src_x=0.0,
         src_y=0.0,
         wind_x=1.0,
@@ -23,7 +22,6 @@ class OdorHoldEnvV4(gym.Env):
         b_hold=0.5,
         b_oob=5.0,
         max_steps=300,
-        stack_n=1,
         seed=0,
         bg_c=0.0,
         sensor_noise=0.01,
@@ -34,11 +32,9 @@ class OdorHoldEnvV4(gym.Env):
         omega_accel_max=50.0,
         control_penalty=0.01,
         turn_penalty=0.01,
-        cast_penalty=0.01,
+        cast_penalty=0.02,
         reward_mode="mechanical",
         goal_hold_steps=20,
-        goal_complete_bonus=1.0,
-        goal_exit_penalty=0.3,
         terminate_on_hold=True,
         turn_requires_cast=True,
         turn_window_steps=1,
@@ -47,7 +43,6 @@ class OdorHoldEnvV4(gym.Env):
         self.render_mode = render_mode
         self.L = float(L)
         self.dt = float(dt)
-        self.v_fixed = v_fixed
         self.ds = float(sensor_offset)
         self.src_x = float(np.clip(float(src_x), -self.L, self.L))
         self.src_y = float(np.clip(float(src_y), -self.L, self.L))
@@ -66,7 +61,6 @@ class OdorHoldEnvV4(gym.Env):
         self.b_hold = float(b_hold)
         self.b_oob = float(b_oob)
         self.max_steps = int(max_steps)
-        self.stack_n = int(stack_n)
         self.bg_c = float(bg_c)
         self.sensor_noise = float(sensor_noise)
 
@@ -86,8 +80,6 @@ class OdorHoldEnvV4(gym.Env):
         if self.reward_mode not in ("mechanical", "bio"):
             raise ValueError("reward_mode must be one of ['mechanical', 'bio']")
         self.goal_hold_steps = int(max(1, goal_hold_steps))
-        self.goal_complete_bonus = float(goal_complete_bonus)
-        self.goal_exit_penalty = float(goal_exit_penalty)
         self.terminate_on_hold = bool(terminate_on_hold)
         self.turn_requires_cast = bool(turn_requires_cast)
         self.turn_window_steps = int(max(1, turn_window_steps))
@@ -117,7 +109,6 @@ class OdorHoldEnvV4(gym.Env):
 
         self.in_cast = False
         self.cast_phase = 0
-        self._last_cast_delta = 0.0
         self.turn_steps_left = 0
         self._scan_dirs = np.array([np.pi / 2, -np.pi / 2], dtype=np.float32)
         self._scan_seq = (0, 1, 0, 1)
@@ -184,9 +175,6 @@ class OdorHoldEnvV4(gym.Env):
 
         self.cast_phase += 1
         if self.cast_phase >= 4:
-            meanL = float((self._scan_c[0] + self._scan_c[2]) * 0.5)
-            meanR = float((self._scan_c[1] + self._scan_c[3]) * 0.5)
-            self._last_cast_delta = meanL - meanR
             self.in_cast = False
             self.cast_phase = 0
             self._scan_c[:] = 0.0
@@ -198,16 +186,29 @@ class OdorHoldEnvV4(gym.Env):
         if seed is not None:
             self.np_random = np.random.default_rng(seed)
 
-        r_min, r_max = max(self.r_goal + 0.25, 0.6), min(0.8 * self.L, self.L - 0.25)
+        spawn_margin = 0.25
+        spawn_radius_tries = 80
+        spawn_angle_tries = 80
+        r_min, r_max = max(self.r_goal + spawn_margin, 0.6), min(0.8 * self.L, self.L - spawn_margin)
         cx, cy = self.src_x, self.src_y
 
-        x0, y0 = 0.0, 0.0
-        for _ in range(200):
-            r0 = self.np_random.uniform(r_min, r_max)
-            ang = self.np_random.uniform(-np.pi, np.pi)
-            x0, y0 = cx + r0 * np.cos(ang), cy + r0 * np.sin(ang)
-            if (-self.L + 0.25) <= x0 <= (self.L - 0.25) and (-self.L + 0.25) <= y0 <= (self.L - 0.25):
+        x0, y0 = float(cx), float(cy)
+        found = False
+        for _ in range(max(1, int(spawn_radius_tries))):
+            r0 = float(self.np_random.uniform(r_min, r_max))
+            for _ in range(max(1, int(spawn_angle_tries))):
+                ang = float(self.np_random.uniform(-np.pi, np.pi))
+                tx = float(cx + r0 * np.cos(ang))
+                ty = float(cy + r0 * np.sin(ang))
+                if (-self.L + spawn_margin) <= tx <= (self.L - spawn_margin) and (-self.L + spawn_margin) <= ty <= (self.L - spawn_margin):
+                    x0, y0 = tx, ty
+                    found = True
+                    break
+            if found:
                 break
+        if not found:
+            x0 = float(np.clip(cx, -self.L + spawn_margin, self.L - spawn_margin))
+            y0 = float(np.clip(cy, -self.L + spawn_margin, self.L - spawn_margin))
 
         self.x, self.y = float(x0), float(y0)
         self.th = self.np_random.uniform(-np.pi, np.pi)
@@ -216,7 +217,6 @@ class OdorHoldEnvV4(gym.Env):
         self._step = 0
         self.in_cast = False
         self.cast_phase = 0
-        self._last_cast_delta = 0.0
         self.turn_steps_left = 0
         self._scan_c[:] = 0.0
         self.goal_hold_count = 0

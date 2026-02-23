@@ -14,20 +14,21 @@
 ### Environments
 - `OdorHold-v3`
   - 이산 action 기반 baseline
-  - `spawn-mode`: `legacy | balanced` (v3 전용)
+  - spawn sampler: balanced 고정
 - `OdorHold-v4`
   - action: `[v_cmd, omega_cmd, cast_cmd]`
   - observation: `[c, mode]` (`mode`: run/cast)
   - cast 시작은 정책이 결정
   - cast 수행은 현재 고정 패턴(`L/R/L/R`, 정지)으로 구현
   - 기본 turn 제약: cast 이후 turn 허용(hard constraint)
+  - spawn sampler: balanced 고정
 
 ### Agents
 - `DRQN / DQN` (v3 baseline)
 - `RSAC` (v4 기본)
   - recurrent hybrid actor (`[v, omega]` Gaussian + `cast` Bernoulli)
   - twin critic(Q1/Q2) + target critic
-  - critic type: `recurrent`(default) 또는 `mlp`
+  - recurrent critic 고정
 
 ### Reward Modes in v4
 | Mode | Base Shaping | Goal/Hold Criterion | Purpose |
@@ -46,7 +47,7 @@
 | Turn constraint | cast 이후 `need_turn` 상태에서만 turn 진행 | 기본 hard constraint: cast 이후 turn window에서만 turn 허용 |
 | Observation | `[c, mode] * stack_n` (env stacking) | `[c, mode]` (no env stacking) |
 | Reward | 거리 shaping 단일 모드(`exp(-d/sigma_r)`) | `mechanical`(거리) / `bio`(농도) |
-| Spawn sampler | `legacy | balanced` | v4는 별도 spawn-mode 없음 |
+| Spawn sampler | balanced 고정 | balanced 고정 |
 | Typical agent | `DRQN/DQN` baseline | `RSAC` |
 
 ## Metrics

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.models.networks import RecurrentHybridActor, RecurrentQCritic, MLPQCritic
+from src.models.networks import RecurrentHybridActor, RecurrentQCritic
 
 
 class RSACAgent:
@@ -20,8 +20,6 @@ class RSACAgent:
         lr_alpha=3e-4,
         gamma=0.99,
         tau=0.005,
-        cell_type="gru",
-        critic_type="recurrent",
     ):
         self.device = device
         self.gamma = float(gamma)
@@ -34,22 +32,17 @@ class RSACAgent:
         self.action_high = torch.as_tensor(action_high, dtype=torch.float32, device=device)
         if self.action_low.numel() != 3 or self.action_high.numel() != 3:
             raise ValueError("RSACAgent expects action bounds with 3 elements: [v, omega, cast].")
-        self.critic_type = str(critic_type).lower()
-        if self.critic_type not in ("recurrent", "mlp"):
-            raise ValueError("critic_type must be one of ['recurrent', 'mlp']")
 
         self.actor = RecurrentHybridActor(
             obs_dim,
             cont_act_dim=2,
             hidden=rnn_hidden,
-            cell_type=cell_type,
         ).to(device)
 
-        critic_cls = RecurrentQCritic if self.critic_type == "recurrent" else MLPQCritic
-        self.q1 = critic_cls(obs_dim, act_dim, hidden=rnn_hidden, cell_type=cell_type).to(device)
-        self.q2 = critic_cls(obs_dim, act_dim, hidden=rnn_hidden, cell_type=cell_type).to(device)
-        self.tq1 = critic_cls(obs_dim, act_dim, hidden=rnn_hidden, cell_type=cell_type).to(device)
-        self.tq2 = critic_cls(obs_dim, act_dim, hidden=rnn_hidden, cell_type=cell_type).to(device)
+        self.q1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.q2 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.tq1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.tq2 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
         self.tq1.load_state_dict(self.q1.state_dict())
         self.tq2.load_state_dict(self.q2.state_dict())
 
@@ -155,17 +148,11 @@ class RSACAgent:
             "tq1": self.tq1.state_dict(),
             "tq2": self.tq2.state_dict(),
             "log_alpha": self.log_alpha.detach().cpu(),
-            "critic_type": self.critic_type,
         }
         torch.save(ckpt, path)
 
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
-        ckpt_critic_type = ckpt.get("critic_type")
-        if ckpt_critic_type is not None and str(ckpt_critic_type).lower() != self.critic_type:
-            raise ValueError(
-                f"Checkpoint critic_type='{ckpt_critic_type}' does not match current critic_type='{self.critic_type}'."
-            )
         self.actor.load_state_dict(ckpt["actor"])
         self.q1.load_state_dict(ckpt["q1"])
         self.q2.load_state_dict(ckpt["q2"])

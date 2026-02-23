@@ -24,8 +24,6 @@ def main():
     parser.add_argument("--lr-alpha", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--rnn-cell", choices=["gru", "rnn"], default="gru")
-    parser.add_argument("--critic-type", choices=["recurrent", "mlp"], default="recurrent")
     parser.add_argument("--rnn-hidden", type=int, default=147)
     parser.add_argument("--dqn-hidden", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -39,20 +37,16 @@ def main():
     parser.add_argument("--eps-end", type=float, default=0.05)
     parser.add_argument("--eps-decay-steps", type=int, default=4000)
     parser.add_argument("--log-every", type=int, default=20)
-    parser.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--milestone-every", type=int, default=10)
     
     # Env params
     parser.add_argument("--src-x", type=float, default=0.0)
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
     parser.add_argument("--sigma-c", type=float, default=1.0)
-    parser.add_argument("--spawn-mode", choices=["legacy", "balanced"], default="balanced")
     parser.add_argument("--reward-mode", choices=["mechanical", "bio"], default="mechanical")
     parser.add_argument("--cast-penalty", type=float, default=0.02)
+    parser.add_argument("--turn-penalty", type=float, default=0.01)
     parser.add_argument("--goal-hold-steps", type=int, default=20)
-    parser.add_argument("--goal-complete-bonus", type=float, default=1.0)
-    parser.add_argument("--goal-exit-penalty", type=float, default=0.3)
     parser.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
 
     # Eval/plot params

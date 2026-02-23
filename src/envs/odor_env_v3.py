@@ -16,7 +16,6 @@ class OdorHoldEnv(gym.Env):
         max_steps=300, stack_n=1, seed=0,
         bg_c=0.0, sensor_noise=0.01,
         scan_penalty=0.02, turn_penalty=0.02, cast_turn=0.4,
-        spawn_mode="balanced",
         spawn_margin=0.25,
         spawn_radius_tries=80,
         spawn_angle_tries=80,
@@ -53,9 +52,6 @@ class OdorHoldEnv(gym.Env):
         self.spawn_margin = float(spawn_margin)
         self.spawn_radius_tries = int(spawn_radius_tries)
         self.spawn_angle_tries = int(spawn_angle_tries)
-        self.spawn_mode = str(spawn_mode).lower().strip()
-        if self.spawn_mode not in {"legacy", "balanced"}:
-            raise ValueError(f"Unknown spawn_mode={spawn_mode!r}. Expected 'legacy' or 'balanced'.")
 
         self.action_space = spaces.Discrete(4) # 0:RUN, 1:CAST, 2:TURN_L, 3:TURN_R
         self.need_turn = False
@@ -181,37 +177,6 @@ class OdorHoldEnv(gym.Env):
             and (-self.L + m) <= y <= (self.L - m)
         )
 
-    def _sample_spawn_legacy(self, cx, cy, r_min, r_max):
-        x0, y0 = float(cx), float(cy)
-        r_last = float(r_min)
-        draw_count = 0
-        reject_count = 0
-        for _ in range(200):
-            r0 = float(self.np_random.uniform(r_min, r_max))
-            ang = float(self.np_random.uniform(-np.pi, np.pi))
-            draw_count += 1
-            x0 = float(cx + r0 * np.cos(ang))
-            y0 = float(cy + r0 * np.sin(ang))
-            r_last = r0
-            if self._is_spawn_valid(x0, y0):
-                stats = {
-                    "mode": "legacy",
-                    "draw_count": int(draw_count),
-                    "reject_count": int(reject_count),
-                    "reject_ratio": float(reject_count / draw_count) if draw_count > 0 else 0.0,
-                    "spawn_r": float(r0),
-                }
-                return x0, y0, stats
-            reject_count += 1
-        stats = {
-            "mode": "legacy",
-            "draw_count": int(draw_count),
-            "reject_count": int(reject_count),
-            "reject_ratio": float(reject_count / draw_count) if draw_count > 0 else 0.0,
-            "spawn_r": float(r_last),
-        }
-        return x0, y0, stats
-
     def _sample_spawn_balanced(self, cx, cy, r_min, r_max):
         angle_draw_count = 0
         angle_reject_count = 0
@@ -260,10 +225,7 @@ class OdorHoldEnv(gym.Env):
         r_min, r_max = max(self.r_goal + self.spawn_margin, 0.6), min(0.8 * self.L, self.L - self.spawn_margin)
         cx, cy = self.src_x, self.src_y
 
-        if self.spawn_mode == "legacy":
-            x0, y0, spawn_stats = self._sample_spawn_legacy(cx, cy, r_min, r_max)
-        else:
-            x0, y0, spawn_stats = self._sample_spawn_balanced(cx, cy, r_min, r_max)
+        x0, y0, spawn_stats = self._sample_spawn_balanced(cx, cy, r_min, r_max)
 
         self._last_spawn_stats = dict(spawn_stats)
         self.x, self.y = float(x0), float(y0)
@@ -284,7 +246,7 @@ class OdorHoldEnv(gym.Env):
             self._obs_buf[i] = np.array([c0, 0.0], dtype=np.float32)
 
         info = {
-            "spawn_mode": self.spawn_mode,
+            "spawn_mode": "balanced",
             "spawn_reject_ratio": float(spawn_stats.get("reject_ratio", 0.0)),
             "spawn_r": float(spawn_stats.get("spawn_r", 0.0)),
         }

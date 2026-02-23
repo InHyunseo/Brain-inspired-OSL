@@ -37,16 +37,14 @@ class DQN(nn.Module):
         return self.layer3(x)
 
 
-def _build_rnn(cell_type, input_size, hidden_size):
-    if cell_type == "rnn":
-        return nn.RNN(input_size=input_size, hidden_size=hidden_size, nonlinearity="tanh", batch_first=True)
+def _build_gru(input_size, hidden_size):
     return nn.GRU(input_size=input_size, hidden_size=hidden_size, batch_first=True)
 
 
 class RecurrentGaussianActor(nn.Module):
-    def __init__(self, obs_dim, act_dim, action_low, action_high, hidden=147, cell_type="gru", log_std_min=-5.0, log_std_max=2.0):
+    def __init__(self, obs_dim, act_dim, action_low, action_high, hidden=147, log_std_min=-5.0, log_std_max=2.0):
         super().__init__()
-        self.rnn = _build_rnn(cell_type, obs_dim, hidden)
+        self.rnn = _build_gru(obs_dim, hidden)
         self.mu = nn.Linear(hidden, act_dim)
         self.log_std = nn.Linear(hidden, act_dim)
         self.log_std_min = float(log_std_min)
@@ -86,9 +84,9 @@ class RecurrentGaussianActor(nn.Module):
 
 
 class RecurrentQCritic(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden=147, cell_type="gru"):
+    def __init__(self, obs_dim, act_dim, hidden=147):
         super().__init__()
-        self.rnn = _build_rnn(cell_type, obs_dim, hidden)
+        self.rnn = _build_gru(obs_dim, hidden)
         self.fc1 = nn.Linear(hidden + act_dim, hidden)
         self.fc2 = nn.Linear(hidden, hidden)
         self.q = nn.Linear(hidden, 1)
@@ -106,31 +104,6 @@ class RecurrentQCritic(nn.Module):
         return q, h2
 
 
-class MLPQCritic(nn.Module):
-    """
-    Non-recurrent Q critic with the same call signature as RecurrentQCritic.
-    Returns (q, None) so RSAC code path can stay unchanged.
-    """
-    def __init__(self, obs_dim, act_dim, hidden=147, cell_type="gru"):
-        super().__init__()
-        del cell_type  # kept for constructor compatibility
-        self.fc1 = nn.Linear(obs_dim + act_dim, hidden)
-        self.fc2 = nn.Linear(hidden, hidden)
-        self.q = nn.Linear(hidden, 1)
-
-    def forward(self, obs, act, h=None):
-        del h
-        if obs.dim() == 2:
-            obs = obs.unsqueeze(1)
-        if act.dim() == 2:
-            act = act.unsqueeze(1)
-        z = torch.cat([obs, act], dim=-1)
-        z = F.relu(self.fc1(z))
-        z = F.relu(self.fc2(z))
-        q = self.q(z).squeeze(-1)
-        return q, None
-
-
 class RecurrentHybridActor(nn.Module):
     """
     Hybrid policy for [v, omega, cast]:
@@ -142,13 +115,12 @@ class RecurrentHybridActor(nn.Module):
         obs_dim,
         cont_act_dim,
         hidden=147,
-        cell_type="gru",
         log_std_min=-5.0,
         log_std_max=2.0,
         cast_temperature=0.5,
     ):
         super().__init__()
-        self.rnn = _build_rnn(cell_type, obs_dim, hidden)
+        self.rnn = _build_gru(obs_dim, hidden)
         self.mu = nn.Linear(hidden, cont_act_dim)
         self.log_std = nn.Linear(hidden, cont_act_dim)
         self.cast_logit = nn.Linear(hidden, 1)
