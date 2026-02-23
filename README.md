@@ -34,7 +34,7 @@
 | Mode | Base Shaping | Goal/Hold Criterion | Purpose |
 |---|---|---|---|
 | `mechanical` | `exp(-d/sigma_r)` | `d < r_goal` | 전통 RL shaping baseline |
-| `bio` | `c` | `d < r_goal` | chemotaxis-inspired shaping |
+| `bio` | `bio_reward_scale * c` | `d < r_goal` | chemotaxis-inspired shaping |
 
 정리하면 현재 `mechanical`과 `bio`의 핵심 차이는 base shaping 항(`distance` vs `concentration`)입니다.
 

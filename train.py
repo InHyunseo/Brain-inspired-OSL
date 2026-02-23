@@ -55,6 +55,7 @@ def train(args):
     if str(args.env_id).endswith("-v4"):
         env_kwargs.update(
             reward_mode=getattr(args, "reward_mode", "mechanical"),
+            bio_reward_scale=getattr(args, "bio_reward_scale", 0.5),
             cast_penalty=getattr(args, "cast_penalty", 0.02),
             turn_penalty=getattr(args, "turn_penalty", 0.01),
             goal_hold_steps=getattr(args, "goal_hold_steps", 20),
@@ -247,6 +248,7 @@ if __name__ == "__main__":
     p.add_argument("--wind-x", type=float, default=0.0)
     p.add_argument("--sigma-c", type=float, default=1.0)
     p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="mechanical")
+    p.add_argument("--bio-reward-scale", type=float, default=0.5)
     p.add_argument("--cast-penalty", type=float, default=0.02)
     p.add_argument("--turn-penalty", type=float, default=0.01)
     p.add_argument("--goal-hold-steps", type=int, default=20)

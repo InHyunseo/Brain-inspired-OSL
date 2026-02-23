@@ -34,6 +34,7 @@ class OdorHoldEnvV4(gym.Env):
         turn_penalty=0.01,
         cast_penalty=0.02,
         reward_mode="mechanical",
+        bio_reward_scale=0.5,
         goal_hold_steps=20,
         terminate_on_hold=True,
         turn_requires_cast=True,
@@ -72,6 +73,7 @@ class OdorHoldEnvV4(gym.Env):
         self.control_penalty = float(control_penalty)
         self.turn_penalty = float(turn_penalty)
         self.cast_penalty = float(cast_penalty)
+        self.bio_reward_scale = float(max(0.0, bio_reward_scale))
         mode = str(reward_mode).lower()
         # Backward compatibility with old configs.
         if mode == "dense":
@@ -295,7 +297,7 @@ class OdorHoldEnvV4(gym.Env):
 
         if self.reward_mode == "bio":
             # Bio reward: same structure as mechanical, but concentration shaping.
-            r = float(c)
+            r = float(self.bio_reward_scale * c)
             if did_cast:
                 r -= self.cast_penalty
             else:

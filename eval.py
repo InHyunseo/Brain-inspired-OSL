@@ -113,6 +113,7 @@ def evaluate(args):
     if str(env_id).endswith("-v4"):
         env_kwargs.update({
             'reward_mode': conf.get('reward_mode', 'mechanical'),
+            'bio_reward_scale': conf.get('bio_reward_scale', 0.5),
             'cast_penalty': conf.get('cast_penalty', 0.02),
             'turn_penalty': conf.get('turn_penalty', 0.01),
             'goal_hold_steps': conf.get('goal_hold_steps', 20),
