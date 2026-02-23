@@ -40,7 +40,7 @@ def main():
     parser.add_argument("--eps-decay-steps", type=int, default=4000)
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--first-milestone-ep", type=int, default=100)
+    parser.add_argument("--milestone-every", type=int, default=10)
     
     # Env params
     parser.add_argument("--src-x", type=float, default=0.0)

@@ -28,6 +28,7 @@ def make_env(env_id, **kwargs):
 
 def train(args):
     set_global_seed(args.seed)
+    first_milestone_ep = 100
 
     # 1. Setup
     run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
@@ -109,7 +110,6 @@ def train(args):
     best_return = -np.inf
     best_ep = 0
     saved_eps = []
-    first_ep_saved = 1
     
     interrupted = False
     try:
@@ -164,15 +164,15 @@ def train(args):
                 best_ep = ep
                 agent.save(os.path.join(ckpt_dir, "best.pt"))
 
-            if args.save_milestones and ep == 1:
+            if args.save_milestones and ep == first_milestone_ep:
                 agent.save(os.path.join(ckpt_dir, "first.pt"))
-                first_ep_saved = 1
 
-            if args.save_milestones and ep == args.first_milestone_ep:
-                agent.save(os.path.join(ckpt_dir, "first.pt"))
-                first_ep_saved = int(ep)
-
-            if args.save_milestones and tmp_mid_dir is not None and ep >= args.first_milestone_ep and ep % args.milestone_every == 0:
+            if (
+                args.save_milestones
+                and tmp_mid_dir is not None
+                and ep >= first_milestone_ep
+                and ep % args.milestone_every == 0
+            ):
                 pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
                 agent.save(pep)
                 if ep not in saved_eps:
@@ -196,14 +196,19 @@ def train(args):
         print("\n[Warn] Training interrupted. Saving partial artifacts...")
     finally:
         if args.save_milestones and best_ep > 0:
-            first_ep = int(first_ep_saved)
             first_path = os.path.join(ckpt_dir, "first.pt")
             best_path = os.path.join(ckpt_dir, "best.pt")
-            lo = min(first_ep, int(best_ep))
-            hi = max(first_ep, int(best_ep))
+
+            cands = [(int(best_ep), best_path)]
+            first_ep = -1
+            if os.path.exists(first_path):
+                first_ep = int(first_milestone_ep)
+                cands.append((first_ep, first_path))
+
+            lo = min(ep for ep, _ in cands)
+            hi = max(ep for ep, _ in cands)
             mid_target = (lo + hi) // 2
 
-            cands = [(first_ep, first_path), (int(best_ep), best_path)]
             if tmp_mid_dir is not None:
                 for ep in sorted(set(saved_eps)):
                     if lo <= ep <= hi:
@@ -279,7 +284,6 @@ if __name__ == "__main__":
     p.add_argument("--log-every", type=int, default=20)
     p.add_argument("--force-cpu", action="store_true")
     p.add_argument("--save-milestones", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--first-milestone-ep", type=int, default=100)
     p.add_argument("--milestone-every", type=int, default=10)
 
     args = p.parse_args()

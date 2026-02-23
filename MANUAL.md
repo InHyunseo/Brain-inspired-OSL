@@ -62,7 +62,6 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 
 ### Milestone / Eval
 - `--save-milestones` / `--no-save-milestones` (default save)
-- `--first-milestone-ep`: default `100`
 - `--milestone-every`: default `10`
 - `--eval-episodes`: default `10`
 - `--seed-base`: default `20000`
@@ -71,7 +70,7 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 
 ## Notes
 - `RSAC`에서는 `--eps-start/--eps-end/--eps-decay-steps`가 실질적으로 사용되지 않습니다.
-- `first.pt`는 항상 `ep1`에서 생성되고, `first-milestone-ep`(기본 100)에 도달하면 그 시점 체크포인트로 덮어씁니다.
+- `first.pt`는 `ep100`에서 생성되며, 이후 중간 체크포인트는 `ep100`부터 `milestone-every` 주기에 맞춰 저장됩니다.
 - 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
 
 ## Output Structure
