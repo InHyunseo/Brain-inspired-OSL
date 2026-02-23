@@ -113,11 +113,8 @@ def evaluate(args):
     }
     if str(env_id).endswith("-v4"):
         env_kwargs.update({
-            'reward_mode': conf.get('reward_mode', 'dense'),
+            'reward_mode': conf.get('reward_mode', 'mechanical'),
             'cast_penalty': conf.get('cast_penalty', 0.01),
-            'odor_abs_weight': conf.get('odor_abs_weight', 0.0),
-            'odor_delta_weight': conf.get('odor_delta_weight', 1.0),
-            'cast_info_bonus': conf.get('cast_info_bonus', 0.0),
             'goal_hold_steps': conf.get('goal_hold_steps', 20),
             'goal_complete_bonus': conf.get('goal_complete_bonus', 1.0),
             'goal_exit_penalty': conf.get('goal_exit_penalty', 0.3),

@@ -47,6 +47,7 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `--seed`: default `42`
 - `--force-cpu`
 - `--spawn-mode`: `legacy | balanced` (default `balanced`, v3 전용)
+- `--reward-mode`: `mechanical | bio` (default `mechanical`)
 
 ### RSAC-related
 - `--lr-actor`: default `3e-4`
@@ -72,6 +73,9 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 ## Notes
 - `RSAC`에서는 `--eps-start/--eps-end/--eps-decay-steps`가 실질적으로 사용되지 않습니다.
 - `OdorHold-v3`의 `spawn-mode=balanced`는 소스가 경계로 이동할 때 스폰 반경 분포 왜곡을 줄이기 위한 보정 샘플러입니다.
+- `OdorHold-v4`의 `reward-mode=mechanical`은 전통 RL shaping(거리 기반 + 행동비용)입니다.
+- `OdorHold-v4`의 `reward-mode=bio`는 mechanical과 동일한 보상 구조에서 거리 shaping(`exp(-d/sigma_r)`)만 농도 shaping(`c`)으로 바꿉니다.
+- `goal/hold` 판정(`d < r_goal`)과 종료 조건은 `mechanical`/`bio` 공통입니다.
 - `first.pt`는 `ep100`에서 생성되며, 이후 중간 체크포인트는 `ep100`부터 `milestone-every` 주기에 맞춰 저장됩니다.
 - 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
 

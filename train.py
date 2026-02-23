@@ -56,11 +56,8 @@ def train(args):
     }
     if str(args.env_id).endswith("-v4"):
         env_kwargs.update(
-            reward_mode=getattr(args, "reward_mode", "dense"),
+            reward_mode=getattr(args, "reward_mode", "mechanical"),
             cast_penalty=getattr(args, "cast_penalty", 0.01),
-            odor_abs_weight=getattr(args, "odor_abs_weight", 0.0),
-            odor_delta_weight=getattr(args, "odor_delta_weight", 1.0),
-            cast_info_bonus=getattr(args, "cast_info_bonus", 0.0),
             goal_hold_steps=getattr(args, "goal_hold_steps", 20),
             goal_complete_bonus=getattr(args, "goal_complete_bonus", 1.0),
             goal_exit_penalty=getattr(args, "goal_exit_penalty", 0.3),
@@ -263,11 +260,8 @@ if __name__ == "__main__":
     p.add_argument("--wind-x", type=float, default=0.0)
     p.add_argument("--sigma-c", type=float, default=1.0)
     p.add_argument("--spawn-mode", choices=["legacy", "balanced"], default="balanced")
-    p.add_argument("--reward-mode", choices=["dense", "bio"], default="bio")
+    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
     p.add_argument("--cast-penalty", type=float, default=0.01)
-    p.add_argument("--odor-abs-weight", type=float, default=0.0)
-    p.add_argument("--odor-delta-weight", type=float, default=1.0)
-    p.add_argument("--cast-info-bonus", type=float, default=0.0)
     p.add_argument("--goal-hold-steps", type=int, default=20)
     p.add_argument("--goal-complete-bonus", type=float, default=1.0)
     p.add_argument("--goal-exit-penalty", type=float, default=0.3)

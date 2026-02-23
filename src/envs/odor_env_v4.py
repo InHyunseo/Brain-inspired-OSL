@@ -35,10 +35,7 @@ class OdorHoldEnvV4(gym.Env):
         control_penalty=0.01,
         turn_penalty=0.01,
         cast_penalty=0.01,
-        reward_mode="dense",
-        odor_abs_weight=0.0,
-        odor_delta_weight=1.0,
-        cast_info_bonus=0.0,
+        reward_mode="mechanical",
         goal_hold_steps=20,
         goal_complete_bonus=1.0,
         goal_exit_penalty=0.3,
@@ -81,12 +78,13 @@ class OdorHoldEnvV4(gym.Env):
         self.control_penalty = float(control_penalty)
         self.turn_penalty = float(turn_penalty)
         self.cast_penalty = float(cast_penalty)
-        self.reward_mode = str(reward_mode).lower()
-        if self.reward_mode not in ("dense", "bio"):
-            raise ValueError("reward_mode must be one of ['dense', 'bio']")
-        self.odor_abs_weight = float(odor_abs_weight)
-        self.odor_delta_weight = float(odor_delta_weight)
-        self.cast_info_bonus = float(cast_info_bonus)
+        mode = str(reward_mode).lower()
+        # Backward compatibility with old configs.
+        if mode == "dense":
+            mode = "mechanical"
+        self.reward_mode = mode
+        if self.reward_mode not in ("mechanical", "bio"):
+            raise ValueError("reward_mode must be one of ['mechanical', 'bio']")
         self.goal_hold_steps = int(max(1, goal_hold_steps))
         self.goal_complete_bonus = float(goal_complete_bonus)
         self.goal_exit_penalty = float(goal_exit_penalty)
@@ -101,10 +99,12 @@ class OdorHoldEnvV4(gym.Env):
             dtype=np.float32,
         )
 
-        # Keep v3-style per-step observation (no stacking in output): [concentration, mode]
+        # Per-step observation for both reward modes: [concentration, mode]
         # mode: 0=run, 1=cast
         self.obs_step_dim = 2
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.obs_step_dim,), dtype=np.float32)
+        obs_low = np.array([0.0, 0.0], dtype=np.float32)
+        obs_high = np.array([1.0, 1.0], dtype=np.float32)
+        self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         self.np_random = np.random.default_rng(seed)
 
@@ -181,7 +181,6 @@ class OdorHoldEnvV4(gym.Env):
         phi = float(self._scan_dirs[side])
         c = self._sense(phi)
         self._scan_c[i] = float(c)
-        self._set_obs(c, mode=1.0)
 
         self.cast_phase += 1
         if self.cast_phase >= 4:
@@ -271,10 +270,13 @@ class OdorHoldEnvV4(gym.Env):
             self.y += self.v * np.sin(self.th) * self.dt
 
             c = self._sense(0.0)
-            self._set_obs(c, mode=0.0)
 
             if self.turn_requires_cast and self.turn_steps_left > 0:
                 self.turn_steps_left -= 1
+
+        delta_c = float(c - prev_c)
+        obs_mode = 1.0 if did_cast else 0.0
+        self._set_obs(c, mode=obs_mode)
 
         oob = (abs(self.x) > self.L) or (abs(self.y) > self.L)
         terminated = bool(oob)
@@ -292,23 +294,17 @@ class OdorHoldEnvV4(gym.Env):
         self.prev_in_goal = in_goal
 
         if self.reward_mode == "bio":
-            delta_c = float(c - prev_c)
-            r = self.odor_abs_weight * float(c)
-            r += self.odor_delta_weight * delta_c
+            # Bio reward: same structure as mechanical, but concentration shaping.
+            r = float(c)
             if did_cast:
                 r -= self.cast_penalty
-                if (not self.in_cast) and self.cast_phase == 0:
-                    r += self.cast_info_bonus * abs(self._last_cast_delta)
             else:
                 r -= self.control_penalty * (abs(self.v) / (self.v_max + 1e-6))
                 r -= self.turn_penalty * (abs(self.omega) / (self.omega_max + 1e-6))
             if in_goal:
                 r += self.b_hold
-            if goal_exited:
-                r -= self.goal_exit_penalty
-            if success_hold:
-                r += self.goal_complete_bonus
         else:
+            # Mechanical reward: distance shaping + action costs.
             r = np.exp(-d / self.sigma_r)
             if in_goal:
                 r += self.b_hold
@@ -329,7 +325,7 @@ class OdorHoldEnvV4(gym.Env):
             "goal_hold_count": int(self.goal_hold_count),
             "goal_exited": int(goal_exited),
             "success_hold": int(success_hold),
-            "delta_c": float(c - prev_c),
+            "delta_c": delta_c,
             "src_x": self.src_x,
             "src_y": self.src_y,
             "v": self.v,
