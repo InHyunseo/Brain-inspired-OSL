@@ -17,8 +17,8 @@ def main():
     parser.add_argument("--force-cpu", action="store_true")
 
     parser.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="drqn")
-    parser.add_argument("--total-episodes", type=int, default=600)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--total-episodes", type=int, default=20000)
+    parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--lr-actor", type=float, default=3e-4)
     parser.add_argument("--lr-critic", type=float, default=3e-4)
     parser.add_argument("--lr-alpha", type=float, default=3e-4)
