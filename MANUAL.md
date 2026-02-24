@@ -54,7 +54,7 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 
 ## Main Arguments (`main.py`)
 - `--env-id`: default `OdorHold-v4`
-- `--agent-type`: `drqn | dqn | rsac` (default `drqn`)
+- `--agent-type`: `drqn | dqn | rsac` (default `rsac`)
 - `--total-episodes`: default `20000`
 - `--seed`: default `42`
 - `--force-cpu`

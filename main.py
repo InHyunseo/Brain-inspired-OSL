@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force-cpu", action="store_true")
 
-    parser.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="drqn")
+    parser.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="rsac")
     parser.add_argument("--total-episodes", type=int, default=20000)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--lr-actor", type=float, default=3e-4)
