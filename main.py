@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--sigma-c", type=float, default=1.0)
     parser.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
     parser.add_argument("--bio-reward-scale", type=float, default=0.5)
-    parser.add_argument("--cast-penalty", type=float, default=0.02)
+    parser.add_argument("--cast-penalty", type=float, default=0.025)
     parser.add_argument("--turn-penalty", type=float, default=0.01)
     parser.add_argument("--b-hold", type=float, default=0.5)
     parser.add_argument("--goal-hold-steps", type=int, default=20)

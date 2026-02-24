@@ -32,7 +32,7 @@ class OdorHoldEnvV4(gym.Env):
         omega_accel_max=50.0,
         control_penalty=0.01,
         turn_penalty=0.01,
-        cast_penalty=0.02,
+        cast_penalty=0.025,
         reward_mode="mechanical",
         bio_reward_scale=0.5,
         goal_hold_steps=20,

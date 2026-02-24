@@ -41,14 +41,14 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 ```
 
 ## Main Arguments (`main.py`)
-- `--env-id`: default `OdorHold-v3`
+- `--env-id`: default `OdorHold-v4`
 - `--agent-type`: `drqn | dqn | rsac` (default `drqn`)
 - `--total-episodes`: default `20000`
 - `--seed`: default `42`
 - `--force-cpu`
 - `--reward-mode`: `mechanical | bio` (default `bio`)
 - `--bio-reward-scale`: default `0.5` (`reward-mode=bio`일 때 concentration shaping 계수)
-- `--cast-penalty`: default `0.02`
+- `--cast-penalty`: default `0.025`
 - `--turn-penalty`: default `0.01`
 - `--b-hold`: default `0.5` (goal 영역 유지 보상)
 - `--goal-hold-steps`: default `20`
