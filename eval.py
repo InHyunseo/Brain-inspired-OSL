@@ -166,6 +166,9 @@ def evaluate(args):
             lr_alpha=conf.get("lr_alpha", 3e-4),
             gamma=conf.get("gamma", 0.99),
             tau=conf.get("tau", 0.005),
+            actor_backbone=conf.get("rsac_actor_backbone", "gru"),
+            connectome_steps=conf.get("connectome_steps", 4),
+            connectome_hidden=conf.get("connectome_hidden", 256),
         )
 
     ckpt_name = args.ckpt

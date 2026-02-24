@@ -25,6 +25,18 @@ python3 main.py --agent-type rsac --env-id OdorHold-v4 --total-episodes 20000
 python3 train.py --agent-type rsac --env-id OdorHold-v4 --total-episodes 20000 --out-dir runs
 ```
 
+### 2-1. Train (Connectome Actor, `seq_len` 낮춰서 시도)
+```bash
+python3 train.py \
+  --agent-type rsac \
+  --env-id OdorHold-v4 \
+  --total-episodes 20000 \
+  --rsac-actor-backbone connectome \
+  --connectome-hidden 256 \
+  --connectome-steps 4 \
+  --seq-len 6
+```
+
 ### 3. Eval Only
 ```bash
 python3 eval.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --episodes 50 --no-save-gif
@@ -61,8 +73,11 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `--gamma`: default `0.99`
 - `--tau`: default `0.005`
 - `--rnn-hidden`: default `147`
+- `--rsac-actor-backbone`: `gru | connectome` (default `gru`)
+- `--connectome-hidden`: default `256` (`rsac-actor-backbone=connectome`일 때 actor hidden)
+- `--connectome-steps`: default `4` (`rsac-actor-backbone=connectome`일 때 내부 recurrent 반복 횟수)
 - `--batch-size`: default `128`
-- `--seq-len`: default `16`
+- `--seq-len`: default `16` (connectome 실험에서는 `--seq-len 6`으로 낮춰 시도 권장)
 - `--buffer-size`: default `150000`
 - `--learning-starts`: default `5000`
 

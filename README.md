@@ -30,6 +30,50 @@
   - twin critic(Q1/Q2) + target critic
   - recurrent critic 고정
 
+### RSAC Actor Backbones
+- `gru` (기본):
+  - 기존 `GRU` actor backbone
+- `connectome`:
+  - ORN/PN/KC/LN 4개 population 상호작용 구조
+  - hidden 분할 비율: `ORN:PN:KC:LN = 3:1:4:1`
+  - 한 외부 timestep마다 내부 recurrent step을 `connectome_steps`회 반복
+  - 기본값: `connectome_hidden=256`, `connectome_steps=4`
+  - policy head/입출력은 `gru`와 동일 (`mu`, `log_std`, `cast_logit`)
+
+Connectome backbone update 개요:
+- `ORN <- W_pto(PN) + W_oto(ORN) + W_lto(LN) + x_t`
+- `PN <- W_otp(ORN) + W_ktp(KC) + W_ltp(LN) + W_ptp(PN)`
+- `LN <- W_ptl(PN) + W_otl(ORN) + W_ltl(LN)`
+- `KC <- W_ptk(PN) + W_ktk(KC)`
+- 각 단계는 `tanh` 활성화 후 bias를 더해 갱신
+
+### RSAC Actor Size / Compute (현재 기본값 기준)
+세팅 의도:
+- `connectome_hidden=256`으로 actor 파라미터 수를 `gru(hidden=147)`와 비슷한 수준으로 맞춤
+- 다만 기본 `seq_len=16`에서 connectome 연산량이 커서, 실험 시 `--seq-len 6`으로 낮춰 연산 예산을 비슷하게 맞춰봄
+
+비교 기준:
+- observation dim = `2` (`[c, mode]`)
+- action head = `[v, omega, cast]` (`cont_act_dim=2`)
+- GRU baseline: `rnn_hidden=147`, `seq_len=16`
+- Connectome default: `connectome_hidden=256`, `connectome_steps=4`, `seq_len=16`
+
+| Item | GRU baseline | Connectome default |
+|---|---:|---:|
+| Parameter count | `67,331` | `70,752` |
+| Hidden split | - | `ORN=85, PN=29, KC=113, LN=29` |
+| Approx. matmul multiplies / sequence | `1,063,104` | `3,031,456` |
+
+추가 참고(연산 예산 맞춤 시도: `connectome --seq-len 6`):
+- GRU(`seq_len=16`): `1,063,104`
+- Connectome(`steps=4, seq_len=6`): `1,136,796` (약 `+6.9%`)
+
+해석/주의:
+- 현재 기본값(`seq_len=16`)에서는 Connectome actor 파라미터가 GRU baseline 대비 약 `+5.1%`, 연산량은 약 `2.85x`.
+- `seq_len * connectome_steps = 24`여도, 외부 시퀀스 길이는 `seq_len=6`이므로 장기 시계열 정보는 여전히 짧을 수 있음.
+- 기존 RSAC 실험에서 `seq_len=8`도 학습이 충분히 안정적이지 않았던 사례가 있어, `seq_len=6` 설정은 성능 리스크가 있음(연산 예산 정렬 목적의 타협).
+- 위 연산량은 linear/matmul 중심 근사치이며, 실제 wall-clock은 하드웨어/커널 최적화에 따라 달라질 수 있음.
+
 ### Reward Modes in v4
 | Mode | Base Shaping | Goal/Hold Criterion | Purpose |
 |---|---|---|---|

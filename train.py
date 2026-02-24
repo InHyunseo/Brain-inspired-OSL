@@ -126,6 +126,9 @@ def train(args):
             lr_alpha=args.lr_alpha,
             gamma=args.gamma,
             tau=args.tau,
+            actor_backbone=getattr(args, "rsac_actor_backbone", "gru"),
+            connectome_steps=getattr(args, "connectome_steps", 4),
+            connectome_hidden=getattr(args, "connectome_hidden", 256),
         )
     buffer = EpisodeReplayBuffer(args.buffer_size)
 
@@ -364,6 +367,9 @@ if __name__ == "__main__":
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--tau", type=float, default=0.005)
+    p.add_argument("--rsac-actor-backbone", choices=["gru", "connectome"], default="gru")
+    p.add_argument("--connectome-steps", type=int, default=4)
+    p.add_argument("--connectome-hidden", type=int, default=256)
     
     # Hyperparams
     p.add_argument("--buffer-size", type=int, default=150000)

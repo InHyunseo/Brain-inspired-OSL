@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.models.networks import RecurrentHybridActor, RecurrentQCritic
+from src.models.networks import ConnectomeHybridActor, RecurrentHybridActor, RecurrentQCritic
 
 
 class RSACAgent:
@@ -20,11 +20,15 @@ class RSACAgent:
         lr_alpha=3e-4,
         gamma=0.99,
         tau=0.005,
+        actor_backbone="gru",
+        connectome_steps=4,
+        connectome_hidden=256,
     ):
         self.device = device
         self.gamma = float(gamma)
         self.tau = float(tau)
         self.act_dim = int(act_dim)
+        self.actor_backbone = str(actor_backbone).lower()
         if self.act_dim != 3:
             raise ValueError("RSACAgent expects action dim exactly 3: [v, omega, cast].")
 
@@ -33,11 +37,24 @@ class RSACAgent:
         if self.action_low.numel() != 3 or self.action_high.numel() != 3:
             raise ValueError("RSACAgent expects action bounds with 3 elements: [v, omega, cast].")
 
-        self.actor = RecurrentHybridActor(
-            obs_dim,
-            cont_act_dim=2,
-            hidden=rnn_hidden,
-        ).to(device)
+        if self.actor_backbone == "connectome":
+            self.actor = ConnectomeHybridActor(
+                obs_dim,
+                cont_act_dim=2,
+                hidden=connectome_hidden,
+                connectome_steps=connectome_steps,
+            ).to(device)
+        elif self.actor_backbone == "gru":
+            self.actor = RecurrentHybridActor(
+                obs_dim,
+                cont_act_dim=2,
+                hidden=rnn_hidden,
+            ).to(device)
+        else:
+            raise ValueError(
+                f"Unsupported actor_backbone: {self.actor_backbone}. "
+                "Use 'gru' or 'connectome'."
+            )
 
         self.q1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
         self.q2 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
@@ -143,6 +160,7 @@ class RSACAgent:
     def save(self, path):
         ckpt = {
             "actor": self.actor.state_dict(),
+            "actor_backbone": self.actor_backbone,
             "q1": self.q1.state_dict(),
             "q2": self.q2.state_dict(),
             "tq1": self.tq1.state_dict(),
@@ -153,6 +171,11 @@ class RSACAgent:
 
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
+        ckpt_backbone = str(ckpt.get("actor_backbone", "gru")).lower()
+        if str(ckpt_backbone).lower() != self.actor_backbone:
+            raise ValueError(
+                f"Checkpoint actor_backbone={ckpt_backbone} but agent actor_backbone={self.actor_backbone}."
+            )
         self.actor.load_state_dict(ckpt["actor"])
         self.q1.load_state_dict(ckpt["q1"])
         self.q2.load_state_dict(ckpt["q2"])
