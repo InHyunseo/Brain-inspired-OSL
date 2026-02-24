@@ -46,10 +46,11 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `--total-episodes`: default `20000`
 - `--seed`: default `42`
 - `--force-cpu`
-- `--reward-mode`: `mechanical | bio` (default `mechanical`)
+- `--reward-mode`: `mechanical | bio` (default `bio`)
 - `--bio-reward-scale`: default `0.5` (`reward-mode=bio`일 때 concentration shaping 계수)
 - `--cast-penalty`: default `0.02`
 - `--turn-penalty`: default `0.01`
+- `--b-hold`: default `0.5` (goal 영역 유지 보상)
 - `--goal-hold-steps`: default `20`
 - `--terminate-on-hold` / `--no-terminate-on-hold` (default terminate)
 
@@ -79,6 +80,7 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `goal/hold` 판정(`d < r_goal`)과 종료 조건은 `mechanical`/`bio` 공통입니다.
 - `first.pt`는 `ep100`에서 생성되며, `mid.pt`는 `best.pt`와 `first.pt` 사이 중간 시점에 가장 가까운 스냅샷으로 저장됩니다.
 - 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
+- Colab/Drive 연결이 끊겨도 학습 산출물은 로컬 복구 경로(`OSL_RECOVERY_DIR` 또는 기본 `/content/osl_recovery`, 비-Colab은 `/tmp/osl_recovery`)에 함께 저장됩니다.
 
 ## Output Structure
 ```text

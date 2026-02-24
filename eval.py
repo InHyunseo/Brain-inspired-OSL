@@ -99,7 +99,7 @@ def evaluate(args):
     print(f"[Info] Evaluating on {device}")
 
     # Env Params Restore
-    env_id = conf.get("env_id", "OdorHold-v3")
+    env_id = conf.get("env_id", "OdorHold-v4")
     env_kwargs = {
         'L': conf.get('L', 3.0),
         'dt': conf.get('dt', 0.1),
@@ -108,11 +108,12 @@ def evaluate(args):
         'wind_x': conf.get('wind_x', 0.0),
         'wind_y': conf.get('wind_y', 0.0),
         'sigma_c': conf.get('sigma_c', 1.0),
+        'b_hold': conf.get('b_hold', 0.5),
         'r_goal': conf.get('r_goal', 0.35),
     }
     if str(env_id).endswith("-v4"):
         env_kwargs.update({
-            'reward_mode': conf.get('reward_mode', 'mechanical'),
+            'reward_mode': conf.get('reward_mode', 'bio'),
             'bio_reward_scale': conf.get('bio_reward_scale', 0.5),
             'cast_penalty': conf.get('cast_penalty', 0.02),
             'turn_penalty': conf.get('turn_penalty', 0.01),

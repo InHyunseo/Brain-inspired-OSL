@@ -7,10 +7,17 @@ from eval import evaluate
 from src.utils.seed import set_global_seed
 
 
+def _safe_exists(path):
+    try:
+        return os.path.exists(path)
+    except OSError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="End-to-End RL Pipeline")
     
-    parser.add_argument("--env-id", default="OdorHold-v3")
+    parser.add_argument("--env-id", default="OdorHold-v4")
     parser.add_argument("--out-dir", default="runs", help="Root directory for results")
     parser.add_argument("--run-name", default=None, help="Optional fixed run name")
     parser.add_argument("--seed", type=int, default=42)
@@ -43,10 +50,11 @@ def main():
     parser.add_argument("--src-y", type=float, default=0.0)
     parser.add_argument("--wind-x", type=float, default=0.0)
     parser.add_argument("--sigma-c", type=float, default=1.0)
-    parser.add_argument("--reward-mode", choices=["mechanical", "bio"], default="mechanical")
+    parser.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
     parser.add_argument("--bio-reward-scale", type=float, default=0.5)
     parser.add_argument("--cast-penalty", type=float, default=0.02)
     parser.add_argument("--turn-penalty", type=float, default=0.01)
+    parser.add_argument("--b-hold", type=float, default=0.5)
     parser.add_argument("--goal-hold-steps", type=int, default=20)
     parser.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
 
@@ -81,18 +89,25 @@ def main():
     print(f"[Step 1] Training started: {run_name}")
     print(f"{'=' * 40}")
     
+    train_result = None
     try:
-        train(args)
+        train_result = train(args)
     except KeyboardInterrupt:
         print("\n[Warn] Training interrupted by user. Proceeding to evaluation...")
     except Exception as e:
         print(f"[Error] Training failed: {e}")
         return
 
-    run_dir = os.path.join(args.out_dir, run_name)
+    run_dir = os.path.abspath(os.path.join(args.out_dir, run_name))
+    if isinstance(train_result, dict):
+        run_dir = str(train_result.get("run_dir", run_dir))
     
-    if not os.path.exists(run_dir):
+    if not _safe_exists(run_dir):
         print(f"[Error] Run directory not found at {run_dir}")
+        if isinstance(train_result, dict):
+            recovery_dir = train_result.get("recovery_run_dir")
+            if recovery_dir:
+                print(f"[Info] Recovery output may be available at: {recovery_dir}")
         return
 
     print(f"\n[Info] Training finished. Results saved at: {run_dir}")

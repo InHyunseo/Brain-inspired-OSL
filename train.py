@@ -26,6 +26,21 @@ def make_env(env_id, **kwargs):
         register(id=env_id, entry_point=ep, kwargs=kwargs)
     return gym.make(env_id, **kwargs)
 
+
+def _safe_exists(path):
+    try:
+        return os.path.exists(path)
+    except OSError:
+        return False
+
+
+def _default_recovery_root():
+    # Prefer local Colab runtime storage when available.
+    if _safe_exists("/content"):
+        return "/content/osl_recovery"
+    return "/tmp/osl_recovery"
+
+
 def train(args):
     set_global_seed(args.seed)
     first_milestone_ep = 100
@@ -33,16 +48,32 @@ def train(args):
 
     # 1. Setup
     run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
-    run_dir = os.path.join(args.out_dir, run_name)
+    run_dir = os.path.abspath(os.path.join(args.out_dir, run_name))
     ckpt_dir = os.path.join(run_dir, "checkpoints")
-    os.makedirs(ckpt_dir, exist_ok=True)
+    recovery_root = os.environ.get("OSL_RECOVERY_DIR", _default_recovery_root())
+    recovery_run_dir = os.path.join(recovery_root, run_name)
+    recovery_ckpt_dir = os.path.join(recovery_run_dir, "checkpoints")
+    primary_io_ok = True
+    try:
+        os.makedirs(ckpt_dir, exist_ok=True)
+    except OSError as e:
+        primary_io_ok = False
+        print(f"[Warn] Primary output dir unavailable ({ckpt_dir}): {e}")
+    os.makedirs(recovery_ckpt_dir, exist_ok=True)
     tmp_mid_ctx = tempfile.TemporaryDirectory(prefix=f"{run_name}_mid_", dir="/tmp")
     tmp_mid_dir = tmp_mid_ctx.name
     
     device = torch.device("cuda" if torch.cuda.is_available() and not args.force_cpu else "cpu")
     
     # Save Config
-    with open(os.path.join(run_dir, "config.json"), "w") as f:
+    if primary_io_ok:
+        try:
+            with open(os.path.join(run_dir, "config.json"), "w") as f:
+                json.dump(vars(args), f, indent=2)
+        except OSError as e:
+            primary_io_ok = False
+            print(f"[Warn] Failed to write primary config.json: {e}")
+    with open(os.path.join(recovery_run_dir, "config.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
 
     # 2. Init
@@ -51,10 +82,11 @@ def train(args):
         "src_y": args.src_y,
         "wind_x": args.wind_x,
         "sigma_c": args.sigma_c,
+        "b_hold": args.b_hold,
     }
     if str(args.env_id).endswith("-v4"):
         env_kwargs.update(
-            reward_mode=getattr(args, "reward_mode", "mechanical"),
+            reward_mode=getattr(args, "reward_mode", "bio"),
             bio_reward_scale=getattr(args, "bio_reward_scale", 0.5),
             cast_penalty=getattr(args, "cast_penalty", 0.02),
             turn_penalty=getattr(args, "turn_penalty", 0.01),
@@ -103,6 +135,23 @@ def train(args):
     best_return = -np.inf
     best_ep = 0
     saved_eps = []
+
+    def save_checkpoint_dual(agent_obj, filename):
+        nonlocal primary_io_ok
+        wrote_any = False
+        if primary_io_ok:
+            try:
+                agent_obj.save(os.path.join(ckpt_dir, filename))
+                wrote_any = True
+            except OSError as e:
+                primary_io_ok = False
+                print(f"[Warn] Primary checkpoint save failed ({filename}): {e}")
+        try:
+            agent_obj.save(os.path.join(recovery_ckpt_dir, filename))
+            wrote_any = True
+        except OSError as e:
+            print(f"[Warn] Recovery checkpoint save failed ({filename}): {e}")
+        return wrote_any
     
     interrupted = False
     try:
@@ -155,19 +204,22 @@ def train(args):
             if ep_ret > best_return:
                 best_return = ep_ret
                 best_ep = ep
-                agent.save(os.path.join(ckpt_dir, "best.pt"))
+                save_checkpoint_dual(agent, "best.pt")
 
             if ep == first_milestone_ep:
-                agent.save(os.path.join(ckpt_dir, "first.pt"))
+                save_checkpoint_dual(agent, "first.pt")
 
             if (
                 ep >= first_milestone_ep
                 and ep % mid_snapshot_every == 0
             ):
                 pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                agent.save(pep)
-                if ep not in saved_eps:
-                    saved_eps.append(ep)
+                try:
+                    agent.save(pep)
+                    if ep not in saved_eps:
+                        saved_eps.append(ep)
+                except OSError as e:
+                    print(f"[Warn] Temporary snapshot save failed ({pep}): {e}")
             
             if args.agent_type != "rsac" and ep % args.target_update_every == 0:
                 agent.sync_target()
@@ -187,51 +239,106 @@ def train(args):
         print("\n[Warn] Training interrupted. Saving partial artifacts...")
     finally:
         if best_ep > 0:
-            first_path = os.path.join(ckpt_dir, "first.pt")
-            best_path = os.path.join(ckpt_dir, "best.pt")
+            first_primary = os.path.join(ckpt_dir, "first.pt")
+            first_recovery = os.path.join(recovery_ckpt_dir, "first.pt")
+            best_primary = os.path.join(ckpt_dir, "best.pt")
+            best_recovery = os.path.join(recovery_ckpt_dir, "best.pt")
 
-            cands = [(int(best_ep), best_path)]
-            first_ep = -1
-            if os.path.exists(first_path):
-                first_ep = int(first_milestone_ep)
-                cands.append((first_ep, first_path))
+            cands = []
+            if _safe_exists(best_primary):
+                cands.append((int(best_ep), best_primary))
+            if _safe_exists(best_recovery):
+                cands.append((int(best_ep), best_recovery))
+            if not cands:
+                p_best_tmp = os.path.join(tmp_mid_dir, f"ep_{best_ep}.pt")
+                if _safe_exists(p_best_tmp):
+                    cands = [(int(best_ep), p_best_tmp)]
 
-            lo = min(ep for ep, _ in cands)
-            hi = max(ep for ep, _ in cands)
-            mid_target = (lo + hi) // 2
+            if cands:
+                first_ep = -1
+                first_path = None
+                if _safe_exists(first_primary):
+                    first_path = first_primary
+                elif _safe_exists(first_recovery):
+                    first_path = first_recovery
+                if first_path is not None:
+                    first_ep = int(first_milestone_ep)
+                    cands.append((first_ep, first_path))
 
-            for ep in sorted(set(saved_eps)):
-                if lo <= ep <= hi:
-                    p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                    if os.path.exists(p_ep):
-                        cands.append((int(ep), p_ep))
+                lo = min(ep for ep, _ in cands)
+                hi = max(ep for ep, _ in cands)
+                mid_target = (lo + hi) // 2
 
-            mid_ep, mid_src = min(cands, key=lambda item: abs(item[0] - mid_target))
-            shutil.copy2(mid_src, os.path.join(ckpt_dir, "mid.pt"))
+                for ep in sorted(set(saved_eps)):
+                    if lo <= ep <= hi:
+                        p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
+                        if _safe_exists(p_ep):
+                            cands.append((int(ep), p_ep))
 
-            os.makedirs(os.path.join(run_dir, "plot_data"), exist_ok=True)
-            milestone_meta = {
-                "first_ep": int(first_ep),
-                "best_ep": int(best_ep),
-                "mid_target_ep": int(mid_target),
-                "mid_saved_ep": int(mid_ep),
-                "mid_snapshot_every": int(mid_snapshot_every),
-            }
-            with open(os.path.join(run_dir, "plot_data", "milestones.json"), "w") as f:
-                json.dump(milestone_meta, f, indent=2)
+                mid_ep, mid_src = min(cands, key=lambda item: abs(item[0] - mid_target))
+                if primary_io_ok:
+                    try:
+                        shutil.copy2(mid_src, os.path.join(ckpt_dir, "mid.pt"))
+                    except OSError as e:
+                        primary_io_ok = False
+                        print(f"[Warn] Primary mid checkpoint copy failed: {e}")
+                try:
+                    shutil.copy2(mid_src, os.path.join(recovery_ckpt_dir, "mid.pt"))
+                except OSError as e:
+                    print(f"[Warn] Recovery mid checkpoint copy failed: {e}")
+
+                milestone_meta = {
+                    "first_ep": int(first_ep),
+                    "best_ep": int(best_ep),
+                    "mid_target_ep": int(mid_target),
+                    "mid_saved_ep": int(mid_ep),
+                    "mid_snapshot_every": int(mid_snapshot_every),
+                }
+                for base_dir, enabled in ((run_dir, primary_io_ok), (recovery_run_dir, True)):
+                    if not enabled:
+                        continue
+                    try:
+                        os.makedirs(os.path.join(base_dir, "plot_data"), exist_ok=True)
+                        with open(os.path.join(base_dir, "plot_data", "milestones.json"), "w") as f:
+                            json.dump(milestone_meta, f, indent=2)
+                    except OSError as e:
+                        if base_dir == run_dir:
+                            primary_io_ok = False
+                        print(f"[Warn] Failed to write milestones.json in {base_dir}: {e}")
+            else:
+                print("[Warn] No checkpoint available for milestone metadata generation.")
 
         tmp_mid_ctx.cleanup()
 
         if ep_returns:
-            plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
-            plotter.plot_training_pngs_from_data(run_dir)
+            if primary_io_ok:
+                try:
+                    plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
+                    plotter.plot_training_pngs_from_data(run_dir)
+                except OSError as e:
+                    primary_io_ok = False
+                    print(f"[Warn] Failed to save primary training plots: {e}")
+            try:
+                plotter.save_training_plot_data(recovery_run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
+                plotter.plot_training_pngs_from_data(recovery_run_dir)
+            except OSError as e:
+                print(f"[Warn] Failed to save recovery training plots: {e}")
         env.close()
     if interrupted:
         raise KeyboardInterrupt
 
+    preferred_run_dir = run_dir if primary_io_ok and _safe_exists(run_dir) else recovery_run_dir
+    if preferred_run_dir == recovery_run_dir:
+        print(f"[Info] Using recovery output directory: {recovery_run_dir}")
+    return {
+        "run_dir": preferred_run_dir,
+        "primary_run_dir": run_dir,
+        "recovery_run_dir": recovery_run_dir,
+    }
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--env-id", default="OdorHold-v3")
+    p.add_argument("--env-id", default="OdorHold-v4")
     p.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="drqn")
     p.add_argument("--total-episodes", type=int, default=600)
     p.add_argument("--batch-size", type=int, default=128)
@@ -247,10 +354,11 @@ if __name__ == "__main__":
     p.add_argument("--src-y", type=float, default=0.0)
     p.add_argument("--wind-x", type=float, default=0.0)
     p.add_argument("--sigma-c", type=float, default=1.0)
-    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="mechanical")
+    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
     p.add_argument("--bio-reward-scale", type=float, default=0.5)
     p.add_argument("--cast-penalty", type=float, default=0.02)
     p.add_argument("--turn-penalty", type=float, default=0.01)
+    p.add_argument("--b-hold", type=float, default=0.5)
     p.add_argument("--goal-hold-steps", type=int, default=20)
     p.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed", type=int, default=0)
