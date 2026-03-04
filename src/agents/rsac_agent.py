@@ -3,7 +3,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.models.networks import ConnectomeHybridActor, RecurrentHybridActor, RecurrentQCritic
+from src.models.networks import (
+    Connectome2HybridActor,
+    ConnectomeHybridActor,
+    RecurrentHybridActor,
+    RecurrentQCritic,
+)
 
 
 class RSACAgent:
@@ -22,7 +27,7 @@ class RSACAgent:
         tau=0.005,
         actor_backbone="gru",
         connectome_steps=4,
-        connectome_hidden=256,
+        connectome_hidden=180,
     ):
         self.device = device
         self.gamma = float(gamma)
@@ -44,6 +49,13 @@ class RSACAgent:
                 hidden=connectome_hidden,
                 connectome_steps=connectome_steps,
             ).to(device)
+        elif self.actor_backbone == "connectome2":
+            self.actor = Connectome2HybridActor(
+                obs_dim,
+                cont_act_dim=2,
+                hidden=connectome_hidden,
+                connectome_steps=connectome_steps,
+            ).to(device)
         elif self.actor_backbone == "gru":
             self.actor = RecurrentHybridActor(
                 obs_dim,
@@ -53,7 +65,7 @@ class RSACAgent:
         else:
             raise ValueError(
                 f"Unsupported actor_backbone: {self.actor_backbone}. "
-                "Use 'gru' or 'connectome'."
+                "Use 'gru', 'connectome', or 'connectome2'."
             )
 
         self.q1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)

@@ -297,8 +297,18 @@ def render_rollout_frame_png_style(env, title=None):
         ax.plot([ax_x, sx], [ax_y, sy], color=(220 / 255.0, 60 / 255.0, 60 / 255.0), linewidth=2)
         ax.plot(sx, sy, "o", color=(220 / 255.0, 60 / 255.0, 60 / 255.0), markersize=4)
         labels = ("F", "L", "R")
-        scan_idx = int(getattr(env, "_render_scan_idx", 0))
-        scan_idx = max(0, min(scan_idx, 2))
+        scan_idx_attr = getattr(env, "_render_scan_idx", None)
+        if scan_idx_attr is not None:
+            scan_idx = max(0, min(int(scan_idx_attr), 2))
+        else:
+            sense_ang = float(np.arctan2(sy - ax_y, sx - ax_x))
+            rel_ang = (sense_ang - th + np.pi) % (2.0 * np.pi) - np.pi
+            if abs(rel_ang) < 1e-3:
+                scan_idx = 0
+            elif rel_ang > 0.0:
+                scan_idx = 1
+            else:
+                scan_idx = 2
         ax.text(
             ax_x + 0.06 * L,
             ax_y + 0.06 * L,

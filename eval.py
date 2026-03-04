@@ -29,7 +29,8 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
     cast_step_ratios = []
     can_turn_ratios = []
     for i in range(episodes):
-        obs, _ = env.reset(seed=seed_base + i)
+        ep_seed = int(seed_base + i)
+        obs, _ = env.reset(seed=ep_seed)
         h = None
         done = False
         xs, ys = [env.x], [env.y]
@@ -78,7 +79,15 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
         else:
             cast_step_ratios.append(0.0)
             can_turn_ratios.append(0.0)
-        trajectories.append({"return": ep_ret, "success": in_goal, "x": xs, "y": ys})
+        trajectories.append(
+            {
+                "return": ep_ret,
+                "success": in_goal,
+                "x": xs,
+                "y": ys,
+                "seed": ep_seed,
+            }
+        )
     stats = {
         "success_entry_rate": float(success_entry_count / episodes) if episodes > 0 else 0.0,
         "success_hold_rate": float(success_hold_count / episodes) if episodes > 0 else 0.0,
@@ -154,6 +163,16 @@ def evaluate(args):
         )
     else:
         act_dim = env.action_space.shape[0]
+        actor_backbone = getattr(args, "rsac_actor_backbone", None)
+        if actor_backbone is None:
+            actor_backbone = conf.get("rsac_actor_backbone", "gru")
+        connectome_steps = getattr(args, "connectome_steps", None)
+        if connectome_steps is None:
+            connectome_steps = conf.get("connectome_steps", 4)
+        connectome_hidden = getattr(args, "connectome_hidden", None)
+        if connectome_hidden is None:
+            connectome_hidden = conf.get("connectome_hidden", 180)
+
         agent = RSACAgent(
             obs_dim,
             act_dim,
@@ -166,9 +185,9 @@ def evaluate(args):
             lr_alpha=conf.get("lr_alpha", 3e-4),
             gamma=conf.get("gamma", 0.99),
             tau=conf.get("tau", 0.005),
-            actor_backbone=conf.get("rsac_actor_backbone", "gru"),
-            connectome_steps=conf.get("connectome_steps", 4),
-            connectome_hidden=conf.get("connectome_hidden", 256),
+            actor_backbone=actor_backbone,
+            connectome_steps=connectome_steps,
+            connectome_hidden=connectome_hidden,
         )
 
     ckpt_name = args.ckpt
@@ -221,15 +240,22 @@ def evaluate(args):
     if args.save_gif:
         print(f"[Info] Generating GIF with model: {ckpt_name}")
         env_gif = env_cls(render_mode="rgb_array", **env_kwargs)
-        
+
         frames = []
-        # 성공하는 시드를 찾으면 좋겠지만, 일단 seed_base로 녹화
-        obs, _ = env_gif.reset(seed=args.seed_base)
+        best_traj = max(trajectories, key=lambda t: float(t["return"])) if trajectories else None
+        gif_seed = int(best_traj["seed"]) if best_traj is not None else int(args.seed_base)
+        gif_return = float(best_traj["return"]) if best_traj is not None else float("nan")
+        obs, _ = env_gif.reset(seed=gif_seed)
         h = None
         done = False
-        
+
         # 첫 프레임: trajectory plot 스타일 + agent/casting 오버레이
-        frames.append(plotter.render_rollout_frame_png_style(env_gif, title=f"Eval: {ckpt_name}"))
+        frames.append(
+            plotter.render_rollout_frame_png_style(
+                env_gif,
+                title=f"Eval: {ckpt_name} | best return seed={gif_seed} | return={gif_return:.2f}",
+            )
+        )
 
         while not done:
             if agent_type == "rsac":
@@ -238,8 +264,13 @@ def evaluate(args):
                 action, h = agent.get_action(obs, h, epsilon=0.0)
             obs, _, term, trunc, _ = env_gif.step(action)
             done = term or trunc
-            
-            frames.append(plotter.render_rollout_frame_png_style(env_gif, title=f"Eval: {ckpt_name}"))
+
+            frames.append(
+                plotter.render_rollout_frame_png_style(
+                    env_gif,
+                    title=f"Eval: {ckpt_name} | best return seed={gif_seed} | return={gif_return:.2f}",
+                )
+            )
         
         env_gif.close()
         
@@ -296,6 +327,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed-base", type=int, default=20000)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--force-cpu", action="store_true")
+    parser.add_argument("--rsac-actor-backbone", choices=["gru", "connectome", "connectome2"], default=None)
+    parser.add_argument("--connectome-steps", type=int, default=None)
+    parser.add_argument("--connectome-hidden", type=int, default=None)
     parser.add_argument(
         "--save-gif",
         action=argparse.BooleanOptionalAction,
