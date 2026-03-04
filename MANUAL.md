@@ -31,8 +31,8 @@ python3 train.py \
   --agent-type rsac \
   --env-id OdorHold-v4 \
   --total-episodes 20000 \
-  --rsac-actor-backbone connectome \
-  --connectome-hidden 256 \
+  --rsac-actor-backbone connectome2 \
+  --connectome-hidden 180 \
   --connectome-steps 4 \
   --seq-len 6
 ```
@@ -73,28 +73,33 @@ python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --ep
 - `--gamma`: default `0.99`
 - `--tau`: default `0.005`
 - `--rnn-hidden`: default `147`
-- `--rsac-actor-backbone`: `gru | connectome` (default `gru`)
-- `--connectome-hidden`: default `256` (`rsac-actor-backbone=connectome`일 때 actor hidden)
-- `--connectome-steps`: default `4` (`rsac-actor-backbone=connectome`일 때 내부 recurrent 반복 횟수)
+- `--rsac-actor-backbone`: `gru | connectome | connectome2` (default `gru`)
+- `--connectome-hidden`: default `180` (`connectome2`는 `90`의 배수이면서 `>= 180` 필요)
+- `--connectome-steps`: default `4`
 - `--batch-size`: default `128`
-- `--seq-len`: default `16` (connectome 실험에서는 `--seq-len 6`으로 낮춰 시도 권장)
+- `--seq-len`: default `16` (`connectome2` 실험에서는 `--seq-len 6`부터 확인 권장)
 - `--buffer-size`: default `150000`
 - `--learning-starts`: default `5000`
 
 ### Eval
 - `--eval-episodes`: default `100`
 - `--seed-base`: default `20000`
+- `--rsac-actor-backbone`: `gru | connectome | connectome2` (기본은 run config 사용, 지정 시 override)
+- `--connectome-steps`: 지정 시 run config override
+- `--connectome-hidden`: 지정 시 run config override
 - `--save-gif` / `--no-save-gif` (default save)
 - `--plot-milestones` / `--no-plot-milestones` (default plot)
 
 ## Notes
 - `RSAC`에서는 `--eps-start/--eps-end/--eps-decay-steps`가 실질적으로 사용되지 않습니다.
+- 현재 connectome 계열 실험은 `connectome2` 사용을 권장합니다. 기존 `connectome`은 코드에 남아 있지만 주 실험 대상으로는 사용하지 않습니다.
 - `OdorHold-v3`/`OdorHold-v4`의 spawn sampler는 balanced 방식으로 고정되어 있습니다.
 - `OdorHold-v4`의 `reward-mode=mechanical`은 전통 RL shaping(거리 기반 + 행동비용)입니다.
 - `OdorHold-v4`의 `reward-mode=bio`는 mechanical과 동일한 보상 구조에서 거리 shaping(`exp(-d/sigma_r)`)만 농도 shaping(`bio_reward_scale * c`)으로 바꿉니다.
 - `goal/hold` 판정(`d < r_goal`)과 종료 조건은 `mechanical`/`bio` 공통입니다.
 - `first.pt`는 `ep100`에서 생성되며, `mid.pt`는 `best.pt`와 `first.pt` 사이 중간 시점에 가장 가까운 스냅샷으로 저장됩니다.
 - 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
+- `best_agent.gif`는 evaluation에서 측정한 episode들 중 return이 가장 높은 rollout을 다시 렌더링한 결과입니다.
 - Colab/Drive 연결이 끊겨도 학습 산출물은 로컬 복구 경로(`OSL_RECOVERY_DIR` 또는 기본 `/content/osl_recovery`, 비-Colab은 `/tmp/osl_recovery`)에 함께 저장됩니다.
 
 ## Output Structure
