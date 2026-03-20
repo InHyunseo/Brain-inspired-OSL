@@ -6,16 +6,11 @@ import tempfile
 import argparse
 import numpy as np
 import torch
-import gymnasium as gym
-from gymnasium.envs.registration import register
 
 from src.utils.buffer import EpisodeReplayBuffer
-from src.agents.drqn_agent import DRQNAgent
-from src.agents.dqn_agent import DQNAgent
-from src.agents.rsac_agent import RSACAgent
 from src.utils import plotter
 from src.utils.seed import set_global_seed
-from src.utils.factory import make_env, make_agent
+from src.utils.factory import build_env_kwargs, make_env, make_agent
 
 
 
@@ -69,22 +64,7 @@ def train(args):
         json.dump(vars(args), f, indent=2)
 
     # 2. Init
-    env_kwargs = {
-        "src_x": args.src_x,
-        "src_y": args.src_y,
-        "wind_x": args.wind_x,
-        "sigma_c": args.sigma_c,
-        "b_hold": args.b_hold,
-    }
-    if str(args.env_id).endswith("-v4"):
-        env_kwargs.update(
-            reward_mode=getattr(args, "reward_mode", "bio"),
-            bio_reward_scale=getattr(args, "bio_reward_scale", 0.5),
-            cast_penalty=getattr(args, "cast_penalty", 0.025),
-            turn_penalty=getattr(args, "turn_penalty", 0.01),
-            goal_hold_steps=getattr(args, "goal_hold_steps", 20),
-            terminate_on_hold=getattr(args, "terminate_on_hold", True),
-        )
+    env_kwargs = build_env_kwargs(args)
     env = make_env(args.env_id, **env_kwargs)
     env.action_space.seed(args.seed)
     if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
@@ -115,7 +95,8 @@ def train(args):
         except OSError as e:
             print(f"[Warn] Recovery checkpoint save failed ({filename}): {e}")
         return wrote_any
-    
+
+
     interrupted = False
     try:
         for ep in range(1, args.total_episodes + 1):
@@ -126,35 +107,37 @@ def train(args):
             traj = []
             step_count = 0
             first_goal_step = None
-            
-            # Epsilon Decay
+
             frac = min(1.0, (ep / args.eps_decay_steps))
             epsilon = args.eps_start - frac * (args.eps_start - args.eps_end)
             log_stats = None
 
+            is_rsac = (args.agent_type == "rsac")
+            get_action = agent.get_action
+            step_env = env.step
+            sample_batch = buffer.sample_continuous if is_rsac else buffer.sample
+
             while not done:
-                if args.agent_type == "rsac":
-                    action, h_next = agent.get_action(obs, h, epsilon=1.0)
+                if is_rsac:
+                    action, h_next = get_action(obs, h, epsilon=1.0)
                 else:
-                    action, h_next = agent.get_action(obs, h, epsilon)
-                next_obs, reward, term, trunc, info = env.step(action)
+                    action, h_next = get_action(obs, h, epsilon)
+
+                next_obs, reward, term, trunc, info = step_env(action)
                 done = bool(term or trunc)
-                # Bootstrap should stop only on true terminal states, not time-limit truncation.
                 terminal = float(term)
                 step_count += 1
+
                 if first_goal_step is None and info.get("in_goal", 0):
                     first_goal_step = step_count
-                
+
                 traj.append((obs, action, float(reward), next_obs, terminal))
                 obs = next_obs
                 h = h_next
                 ep_ret += reward
-                
+
                 if len(buffer) > args.learning_starts and len(buffer) > args.batch_size * args.seq_len:
-                    if args.agent_type == "rsac":
-                        batch = buffer.sample_continuous(args.batch_size, args.seq_len)
-                    else:
-                        batch = buffer.sample(args.batch_size, args.seq_len)
+                    batch = sample_batch(args.batch_size, args.seq_len)
                     log_stats = agent.update(batch)
 
             buffer.add_episode(traj)
@@ -172,10 +155,7 @@ def train(args):
             if ep == first_milestone_ep:
                 save_checkpoint_dual(agent, "first.pt")
 
-            if (
-                ep >= first_milestone_ep
-                and ep % mid_snapshot_every == 0
-            ):
+            if ep >= first_milestone_ep and ep % mid_snapshot_every == 0:
                 pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
                 try:
                     agent.save(pep)
@@ -183,7 +163,7 @@ def train(args):
                         saved_eps.append(ep)
                 except OSError as e:
                     print(f"[Warn] Temporary snapshot save failed ({pep}): {e}")
-            
+
             if args.agent_type != "rsac" and ep % args.target_update_every == 0:
                 agent.sync_target()
 
@@ -196,7 +176,10 @@ def train(args):
                         f"| alpha: {log_stats['alpha']:.4f} | td|: {log_stats['td_abs']:.4f}"
                     )
                 else:
-                    print(f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} | Eps: {epsilon:.3f}")
+                    print(
+                        f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} | Eps: {epsilon:.3f}"
+                    )
+
     except KeyboardInterrupt:
         interrupted = True
         print("\n[Warn] Training interrupted. Saving partial artifacts...")

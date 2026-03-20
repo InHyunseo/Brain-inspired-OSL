@@ -6,6 +6,22 @@ from src.agents.drqn_agent import DRQNAgent
 from src.agents.rsac_agent import RSACAgent
 
 
+def build_env_kwargs(args):
+    return {
+        "src_x": args.src_x,
+        "src_y": args.src_y,
+        "wind_x": args.wind_x,
+        "sigma_c": args.sigma_c,
+        "reward_mode": args.reward_mode,
+        "bio_reward_scale": args.bio_reward_scale,
+        "cast_penalty": args.cast_penalty,
+        "turn_penalty": args.turn_penalty,
+        "b_hold": args.b_hold,
+        "goal_hold_steps": args.goal_hold_steps,
+        "terminate_on_hold": args.terminate_on_hold,
+    }
+
+
 def make_env(env_id, **kwargs):
     if env_id not in gym.envs.registry:
         if str(env_id).endswith("-v4"):
@@ -35,7 +51,7 @@ def make_agent(args, env, device):
             lr=args.lr,
         )
 
-    else:  # rsac
+    elif args.agent_type == "rsac":
         return RSACAgent(
             env.observation_space.shape[0],
             env.action_space.shape[0],
@@ -52,3 +68,6 @@ def make_agent(args, env, device):
             connectome_steps=getattr(args, "connectome_steps", 4),
             connectome_hidden=getattr(args, "connectome_hidden", 180),
         )
+
+    else:
+        raise ValueError(f"Unsupported agent_type: {args.agent_type}")
