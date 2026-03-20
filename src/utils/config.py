@@ -52,5 +52,12 @@ def build_parser():
                         help="Save rollout GIF during evaluation (default: True)")
     parser.add_argument("--plot-milestones", action=argparse.BooleanOptionalAction, default=True,
                         help="Render milestone trajectory PNGs when available")
+    parser.add_argument("--episodes", type=int, default=None,
+                        help="Override number of episodes for evaluation or rollout")
 
+    parser.add_argument("--ckpt", type=str, default=None,
+                        help="Checkpoint path to evaluate; if None, auto-detect best.pt")
+
+    parser.add_argument("--run-dir", type=str, default=None,
+                        help="Existing run directory for evaluation")
     return parser
