@@ -15,16 +15,8 @@ from src.agents.dqn_agent import DQNAgent
 from src.agents.rsac_agent import RSACAgent
 from src.utils import plotter
 from src.utils.seed import set_global_seed
+from src.utils.factory import make_env, make_agent
 
-
-def make_env(env_id, **kwargs):
-    if env_id not in gym.envs.registry:
-        if str(env_id).endswith("-v4"):
-            ep = 'src.envs.odor_env_v4:OdorHoldEnvV4'
-        else:
-            ep = 'src.envs.odor_env_v3:OdorHoldEnv'
-        register(id=env_id, entry_point=ep, kwargs=kwargs)
-    return gym.make(env_id, **kwargs)
 
 
 def _safe_exists(path):
@@ -97,39 +89,7 @@ def train(args):
     env.action_space.seed(args.seed)
     if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
         env.observation_space.seed(args.seed)
-    if args.agent_type == "dqn":
-        agent = DQNAgent(
-            env.observation_space.shape[0],
-            env.action_space.n,
-            device,
-            hidden=args.dqn_hidden,
-            lr=args.lr,
-        )
-    elif args.agent_type == "drqn":
-        agent = DRQNAgent(
-            env.observation_space.shape[0],
-            env.action_space.n,
-            device,
-            rnn_hidden=args.rnn_hidden,
-            lr=args.lr,
-        )
-    else:
-        agent = RSACAgent(
-            env.observation_space.shape[0],
-            env.action_space.shape[0],
-            env.action_space.low,
-            env.action_space.high,
-            device,
-            rnn_hidden=args.rnn_hidden,
-            lr_actor=args.lr_actor,
-            lr_critic=args.lr_critic,
-            lr_alpha=args.lr_alpha,
-            gamma=args.gamma,
-            tau=args.tau,
-            actor_backbone=getattr(args, "rsac_actor_backbone", "gru"),
-            connectome_steps=getattr(args, "connectome_steps", 4),
-            connectome_hidden=getattr(args, "connectome_hidden", 180),
-        )
+    agent = make_agent(args, env, device)
     buffer = EpisodeReplayBuffer(args.buffer_size)
 
     # 3. Training Loop

@@ -11,6 +11,7 @@ from src.agents.dqn_agent import DQNAgent
 from src.agents.rsac_agent import RSACAgent
 from src.utils import plotter
 from src.utils.seed import set_global_seed
+from src.utils.factory import make_env, make_agent
 
 def load_config(run_dir):
     config_path = os.path.join(run_dir, "config.json")
@@ -135,60 +136,31 @@ def evaluate(args):
         })
     
     # 1. Trajectory Eval Env
-    env_cls = OdorHoldEnvV4 if str(env_id).endswith("-v4") else OdorHoldEnv
-    env = env_cls(**env_kwargs)
+    env = make_env(env_id, **env_kwargs)
     env.action_space.seed(seed)
     if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
         env.observation_space.seed(seed)
     obs_dim = env.observation_space.shape[0]
 
     agent_type = conf.get("agent_type", "drqn")
-    if agent_type == "dqn":
-        act_dim = env.action_space.n
-        agent = DQNAgent(
-            obs_dim,
-            act_dim,
-            device,
-            hidden=conf.get("dqn_hidden", 256),
-            lr=conf.get("lr", 1e-4),
-        )
-    elif agent_type == "drqn":
-        act_dim = env.action_space.n
-        agent = DRQNAgent(
-            obs_dim,
-            act_dim,
-            device,
-            rnn_hidden=conf.get("rnn_hidden", 147),
-            lr=conf.get("lr", 1e-4),
-        )
-    else:
-        act_dim = env.action_space.shape[0]
-        actor_backbone = getattr(args, "rsac_actor_backbone", None)
-        if actor_backbone is None:
-            actor_backbone = conf.get("rsac_actor_backbone", "gru")
-        connectome_steps = getattr(args, "connectome_steps", None)
-        if connectome_steps is None:
-            connectome_steps = conf.get("connectome_steps", 4)
-        connectome_hidden = getattr(args, "connectome_hidden", None)
-        if connectome_hidden is None:
-            connectome_hidden = conf.get("connectome_hidden", 180)
+    class Args:
+        pass
 
-        agent = RSACAgent(
-            obs_dim,
-            act_dim,
-            env.action_space.low,
-            env.action_space.high,
-            device,
-            rnn_hidden=conf.get("rnn_hidden", 147),
-            lr_actor=conf.get("lr_actor", 3e-4),
-            lr_critic=conf.get("lr_critic", 3e-4),
-            lr_alpha=conf.get("lr_alpha", 3e-4),
-            gamma=conf.get("gamma", 0.99),
-            tau=conf.get("tau", 0.005),
-            actor_backbone=actor_backbone,
-            connectome_steps=connectome_steps,
-            connectome_hidden=connectome_hidden,
-        )
+    args_tmp = Args()
+    args_tmp.agent_type = agent_type
+    args_tmp.dqn_hidden = conf.get("dqn_hidden", 256)
+    args_tmp.rnn_hidden = conf.get("rnn_hidden", 147)
+    args_tmp.lr = conf.get("lr", 1e-4)
+    args_tmp.lr_actor = conf.get("lr_actor", 3e-4)
+    args_tmp.lr_critic = conf.get("lr_critic", 3e-4)
+    args_tmp.lr_alpha = conf.get("lr_alpha", 3e-4)
+    args_tmp.gamma = conf.get("gamma", 0.99)
+    args_tmp.tau = conf.get("tau", 0.005)
+    args_tmp.rsac_actor_backbone = conf.get("rsac_actor_backbone", "gru")
+    args_tmp.connectome_steps = conf.get("connectome_steps", 4)
+    args_tmp.connectome_hidden = conf.get("connectome_hidden", 180)
+
+    agent = make_agent(args_tmp, env, device)
 
     ckpt_name = args.ckpt
     if ckpt_name is None:
