@@ -29,12 +29,14 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
     cast_step_counts = []
     cast_step_ratios = []
     can_turn_ratios = []
+    base_env = env.unwrapped
+
     for i in range(episodes):
         ep_seed = int(seed_base + i)
         obs, _ = env.reset(seed=ep_seed)
         h = None
         done = False
-        xs, ys = [env.x], [env.y]
+        xs, ys = [base_env.x], [base_env.y]
         ep_ret = 0.0
         in_goal = False
         hold_success = False
@@ -57,8 +59,8 @@ def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
             cast_step_count += int(info.get("did_cast", 0))
             cast_steps += int(info.get("in_cast", 0))
             can_turn_steps += int(info.get("can_turn", 0))
-            xs.append(env.x)
-            ys.append(env.y)
+            xs.append(base_env.x)
+            ys.append(base_env.y)
             ep_ret += r
             if info.get("in_goal", 0):
                 in_goal = True
@@ -134,7 +136,7 @@ def evaluate(args):
         env_kwargs.update({
             'v_fixed': conf.get('v_fixed', 0.25),
         })
-    
+    env_cls = OdorHoldEnvV4 if str(env_id).endswith("-v4") else OdorHoldEnv
     # 1. Trajectory Eval Env
     env = make_env(env_id, **env_kwargs)
     env.action_space.seed(seed)
