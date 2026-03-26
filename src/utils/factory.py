@@ -71,3 +71,30 @@ def make_agent(args, env, device):
 
     else:
         raise ValueError(f"Unsupported agent_type: {args.agent_type}")
+
+def make_agent_from_conf(conf, env, device, overrides=None):
+    class Obj:
+        pass
+
+    args = Obj()
+    args.agent_type = conf.get("agent_type", "drqn")
+    args.dqn_hidden = conf.get("dqn_hidden", 256)
+    args.rnn_hidden = conf.get("rnn_hidden", 147)
+    args.lr = conf.get("lr", 1e-4)
+
+    args.lr_actor = conf.get("lr_actor", 3e-4)
+    args.lr_critic = conf.get("lr_critic", 3e-4)
+    args.lr_alpha = conf.get("lr_alpha", 3e-4)
+    args.gamma = conf.get("gamma", 0.99)
+    args.tau = conf.get("tau", 0.005)
+    args.rsac_actor_backbone = conf.get("rsac_actor_backbone", "gru")
+    args.connectome_steps = conf.get("connectome_steps", 4)
+    args.connectome_hidden = conf.get("connectome_hidden", 180)
+
+    if overrides is not None:
+        for key in vars(overrides):
+            value = getattr(overrides, key)
+            if value is not None:
+                setattr(args, key, value)
+
+    return make_agent(args, env, device)
