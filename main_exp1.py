@@ -86,7 +86,7 @@ def build_args():
     args.eval_episodes = 100
     args.seed_base = 20000
     args.save_gif = True
-    args.plot_milestones = False   # <- 여기만 바꾸는 걸 추천
+    args.plot_milestones = False 
 
     # runtime-only
     args.run_dir = None

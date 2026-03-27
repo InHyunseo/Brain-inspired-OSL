@@ -15,8 +15,7 @@ class Args:
 def build_args():
     args = Args()
 
-    # 🔴 반드시 여기 수정 (너 run 폴더 경로)
-    args.run_dir = "runs/exp1_baseline_rsac_XXXX"
+    args.run_dir = "exp1_baseline_rsac_20260326_214908"
 
     args.eval_episodes = 100
     args.seed_base = 20000
@@ -78,7 +77,6 @@ def run_experiment():
 
     print(f"[Info] Device: {device}")
 
-    # 🔥 env 생성 (eval.py 그대로 방식)
     env = make_env(conf.get("env_id", "OdorHold-v4"), **conf)
 
     agent = make_agent_from_conf(conf, env, device)
