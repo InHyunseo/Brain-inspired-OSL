@@ -13,6 +13,7 @@ from src.utils.factory import build_env_kwargs, make_env, make_agent, make_agent
 from src.envs.odor_env_v3 import OdorHoldEnv
 from src.envs.odor_env_v4 import OdorHoldEnvV4
 
+# reward 설계 또는 penalty 계수를 바꾸었을 때 성능이 어떻게 달라지는지 확인하는 실험
 
 class Args:
     pass

@@ -13,6 +13,7 @@ from src.utils.factory import build_env_kwargs, make_env, make_agent, make_agent
 from src.envs.odor_env_v3 import OdorHoldEnv
 from src.envs.odor_env_v4 import OdorHoldEnvV4
 
+# GRU, connectome, connectome2 backbone의 성능을 비교하는 실험
 
 class Args:
     pass

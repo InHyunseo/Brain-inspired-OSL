@@ -7,6 +7,7 @@ from src.utils import plotter
 from src.utils.seed import set_global_seed
 from src.utils.factory import make_env, make_agent_from_conf
 
+# 훈련 단계별 checkpoint(first / mid / best)의 trajectory를 비교 시각화하는 실험
 
 class Args:
     pass

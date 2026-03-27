@@ -13,6 +13,7 @@ from src.utils.factory import build_env_kwargs, make_env, make_agent, make_agent
 from src.envs.odor_env_v3 import OdorHoldEnv
 from src.envs.odor_env_v4 import OdorHoldEnvV4
 
+# 가장 기본이 되는 RSAC-GRU 모델을 학습하고 평가하는 baseline 실험
 
 class Args:
     pass
