@@ -19,3 +19,6 @@ data/
 *.gif
 *.pt
 runs/
+.codex
+settings.json
+.claude
