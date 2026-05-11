@@ -1,300 +1,234 @@
-import os
+"""Unified eval entry. Branches on the agent_type recorded in run_dir/config.json.
+
+PPO  : load model + VecNormalize, run elite-seed search, render notebook-style GIF.
+RSAC/DRQN : load checkpoint, run deterministic rollouts, render GIF of the
+            best-return episode using the shared plotter.
+"""
 import json
-import argparse
+import os
+
 import numpy as np
 import torch
 
-from src.envs.odor_env_v3 import OdorHoldEnv
-from src.envs.odor_env_v4 import OdorHoldEnvV4
-from src.utils import plotter
+from src.utils.config import build_parser
+from src.utils.factory import make_agent, make_env
+from src.utils.plotter import render_rollout_frame, save_gif
 from src.utils.seed import set_global_seed
-from src.utils.factory import make_env, make_agent_from_conf
 
-def load_config(run_dir):
-    config_path = os.path.join(run_dir, "config.json")
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found in {run_dir}")
-    with open(config_path, "r") as f:
+
+def _device(args):
+    if args.force_cpu or not torch.cuda.is_available():
+        return torch.device("cpu")
+    return torch.device("cuda")
+
+
+def _load_conf(run_dir):
+    path = os.path.join(run_dir, "config.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Missing config.json in {run_dir}")
+    with open(path, "r") as f:
         return json.load(f)
 
-def _rollout_trajectories(env, agent, agent_type, episodes, seed_base):
-    trajectories = []
-    success_entry_count = 0
-    success_hold_count = 0
-    final_in_goal_count = 0
-    cast_start_counts = []
-    cast_step_counts = []
-    cast_step_ratios = []
-    can_turn_ratios = []
-    base_env = env.unwrapped
 
-    for i in range(episodes):
-        ep_seed = int(seed_base + i)
-        obs, _ = env.reset(seed=ep_seed)
-        h = None
-        done = False
-        xs, ys = [base_env.x], [base_env.y]
-        ep_ret = 0.0
-        in_goal = False
-        hold_success = False
-        final_in_goal = False
-        cast_start_count = 0
-        cast_step_count = 0
-        cast_steps = 0
-        can_turn_steps = 0
-        total_steps = 0
+def _apply_conf_overrides(args, conf):
+    """Restore train-time settings from config.json, but keep CLI-provided eval
+    overrides (--episodes, --noise-coef, --save-gif, --ckpt)."""
+    keep = {"out_dir", "run_dir", "ckpt", "episodes", "eval_episodes",
+            "save_gif", "force_cpu", "noise_coef", "seed_base", "agent_type"}
+    for k, v in conf.items():
+        if k in keep:
+            continue
+        if hasattr(args, k):
+            setattr(args, k, v)
+    args.agent_type = conf.get("agent_type", args.agent_type)
+    return args
 
-        while not done:
-            if agent_type == "rsac":
-                action, h = agent.get_action_deterministic(obs, h)
-            else:
-                action, h = agent.get_action(obs, h, epsilon=0.0)
-            obs, r, term, trunc, info = env.step(action)
-            done = term or trunc
-            total_steps += 1
-            cast_start_count += int(info.get("cast_start", 0))
-            cast_step_count += int(info.get("did_cast", 0))
-            cast_steps += int(info.get("in_cast", 0))
-            can_turn_steps += int(info.get("can_turn", 0))
-            xs.append(base_env.x)
-            ys.append(base_env.y)
-            ep_ret += r
-            if info.get("in_goal", 0):
-                in_goal = True
-            if info.get("success_hold", 0):
-                hold_success = True
-            final_in_goal = bool(info.get("in_goal", 0))
 
-        if in_goal:
-            success_entry_count += 1
-        if hold_success:
-            success_hold_count += 1
-        if final_in_goal:
-            final_in_goal_count += 1
-        cast_start_counts.append(float(cast_start_count))
-        cast_step_counts.append(float(cast_step_count))
-        if total_steps > 0:
-            cast_step_ratios.append(float(cast_steps) / float(total_steps))
-            can_turn_ratios.append(float(can_turn_steps) / float(total_steps))
-        else:
-            cast_step_ratios.append(0.0)
-            can_turn_ratios.append(0.0)
-        trajectories.append(
-            {
-                "return": ep_ret,
-                "success": in_goal,
-                "x": xs,
-                "y": ys,
-                "seed": ep_seed,
-            }
-        )
-    stats = {
-        "success_entry_rate": float(success_entry_count / episodes) if episodes > 0 else 0.0,
-        "success_hold_rate": float(success_hold_count / episodes) if episodes > 0 else 0.0,
-        "final_in_goal_rate": float(final_in_goal_count / episodes) if episodes > 0 else 0.0,
-        "cast_start_count_mean": float(np.mean(cast_start_counts)) if cast_start_counts else 0.0,
-        "cast_step_count_mean": float(np.mean(cast_step_counts)) if cast_step_counts else 0.0,
-        "cast_step_ratio_mean": float(np.mean(cast_step_ratios)) if cast_step_ratios else 0.0,
-        "can_turn_ratio_mean": float(np.mean(can_turn_ratios)) if can_turn_ratios else 0.0,
-    }
-    return trajectories, stats
+# ---------------------------------------------------------------------------
+# PPO eval
+# ---------------------------------------------------------------------------
 
-def evaluate(args):
-    conf = load_config(args.run_dir)
-    seed_arg = getattr(args, "seed", None)
-    seed = int(conf.get("seed", 0) if seed_arg is None else seed_arg)
-    set_global_seed(seed)
-    device = torch.device("cpu") if args.force_cpu else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[Info] Evaluating on {device}")
 
-    # Env Params Restore
-    env_id = conf.get("env_id", "OdorHold-v4")
-    env_kwargs = {
-        'L': conf.get('L', 3.0),
-        'dt': conf.get('dt', 0.1),
-        'src_x': conf.get('src_x', 0.0),
-        'src_y': conf.get('src_y', 0.0),
-        'wind_x': conf.get('wind_x', 0.0),
-        'wind_y': conf.get('wind_y', 0.0),
-        'sigma_c': conf.get('sigma_c', 1.0),
-        'b_hold': conf.get('b_hold', 0.5),
-        'r_goal': conf.get('r_goal', 0.35),
-    }
-    if str(env_id).endswith("-v4"):
-        env_kwargs.update({
-            'reward_mode': conf.get('reward_mode', 'bio'),
-            'bio_reward_scale': conf.get('bio_reward_scale', 0.5),
-            'cast_penalty': conf.get('cast_penalty', 0.025),
-            'turn_penalty': conf.get('turn_penalty', 0.01),
-            'goal_hold_steps': conf.get('goal_hold_steps', 20),
-            'terminate_on_hold': conf.get('terminate_on_hold', True),
-        })
-    else:
-        env_kwargs.update({
-            'v_fixed': conf.get('v_fixed', 0.25),
-        })
-    env_cls = OdorHoldEnvV4 if str(env_id).endswith("-v4") else OdorHoldEnv
-    # 1. Trajectory Eval Env
-    env = make_env(env_id, **env_kwargs)
-    env.action_space.seed(seed)
-    if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
-        env.observation_space.seed(seed)
+def eval_ppo(args, run_dir):
+    from src.agents.ppo_agent import PPOAgent
+    model_path = args.ckpt or os.path.join(run_dir, "checkpoints", "final.zip")
+    vnorm_path = os.path.join(run_dir, "checkpoints", "final_vnorm.pkl")
+    env_kind = f"dynamic:{args.noise_coef}"
 
-    agent_type = conf.get("agent_type", "drqn")
-    agent = make_agent_from_conf(conf, env, device, overrides=args)
+    agent = PPOAgent(features_dim=args.features_dim, seed=args.seed)
+    agent.load(model_path, vecnorm_path=vnorm_path, env_kind=env_kind, n_envs=1)
 
-    ckpt_name = args.ckpt
-    if ckpt_name is None:
-        ckpt_name = "best.pt" if os.path.exists(os.path.join(args.run_dir, "checkpoints", "best.pt")) else "final.pt"
-    
-    ckpt_path = os.path.join(args.run_dir, "checkpoints", ckpt_name)
-    print(f"[Info] Loading model from {ckpt_path}")
-    
-    try:
-        agent.load(ckpt_path)
-    except Exception as e:
-        print(f"[Error] Failed to load checkpoint: {e}")
+    elites = _find_elite_seeds(agent, args)
+    if not elites:
+        print("[eval] no elite seeds found.")
         return
 
-    # --- Metrics Evaluation ---
-    print(f"[Info] Starting evaluation over {args.episodes} episodes...")
-    trajectories, rollout_stats = _rollout_trajectories(env, agent, agent_type, args.episodes, args.seed_base)
-    avg_return = np.mean([t['return'] for t in trajectories])
-    
-    print(f"  > Entry Success: {rollout_stats['success_entry_rate'] * 100:.1f}%")
-    print(f"  > Hold Success:  {rollout_stats['success_hold_rate'] * 100:.1f}%")
-    print(f"  > Final In-Goal: {rollout_stats['final_in_goal_rate'] * 100:.1f}%")
-    print(f"  > Avg Return:   {avg_return:.2f}")
-    print(f"  > Avg Cast Starts: {rollout_stats['cast_start_count_mean']:.2f} / episode")
-    print(f"  > Avg Cast Steps:  {rollout_stats['cast_step_count_mean']:.2f} / episode")
-    print(f"  > Cast Step %:  {rollout_stats['cast_step_ratio_mean'] * 100:.1f}%")
-    print(f"  > Can-Turn %:   {rollout_stats['can_turn_ratio_mean'] * 100:.1f}%")
-
-    plots_dir = os.path.join(args.run_dir, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
-    # Remove legacy single-trajectory artifacts and eval trajectory JSON files.
-    legacy_paths = [
-        os.path.join(plots_dir, "trajectory.png"),
-        os.path.join(args.run_dir, "plot_data", "eval_trajectories.json"),
-        os.path.join(args.run_dir, "plot_data", "eval_trajectories_first.json"),
-        os.path.join(args.run_dir, "plot_data", "eval_trajectories_mid.json"),
-        os.path.join(args.run_dir, "plot_data", "eval_trajectories_best.json"),
-    ]
-    for p in legacy_paths:
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-    
-    env.close()
-
-    # --- GIF Generation (Here!) ---
     if args.save_gif:
-        print(f"[Info] Generating GIF with model: {ckpt_name}")
-        env_gif = env_cls(render_mode="rgb_array", **env_kwargs)
+        best_seed = elites[0]
+        gif_path = os.path.join(run_dir, "plots", "best_agent.gif")
+        _render_ppo_gif(agent, best_seed, env_kind, gif_path)
 
-        frames = []
-        best_traj = max(trajectories, key=lambda t: float(t["return"])) if trajectories else None
-        gif_seed = int(best_traj["seed"]) if best_traj is not None else int(args.seed_base)
-        gif_return = float(best_traj["return"]) if best_traj is not None else float("nan")
-        obs, _ = env_gif.reset(seed=gif_seed)
-        h = None
-        done = False
 
-        # 첫 프레임: trajectory plot 스타일 + agent/casting 오버레이
-        frames.append(
-            plotter.render_rollout_frame_png_style(
-                env_gif,
-                title=f"Eval: {ckpt_name} | best return seed={gif_seed} | return={gif_return:.2f}",
+def _find_elite_seeds(agent, args, n_to_find=3, min_casts=1, max_casts=300):
+    elites = []
+    vec = agent.vec_env
+    print(f"[eval] searching elite seeds (success + casts in [{min_casts}, {max_casts}])")
+    for trial in range(min(args.eval_episodes * 5, 500)):
+        seed = args.seed_base + trial
+        vec.seed(seed)
+        obs = vec.reset()
+
+        lstm_states, ep_starts = None, np.ones((1,), dtype=bool)
+        for _ in range(300):
+            action, lstm_states = agent.predict(
+                obs, state=lstm_states, episode_start=ep_starts, deterministic=True
             )
+            obs, _, done, infos = vec.step(action)
+            ep_starts = done
+            if done[0]:
+                info = infos[0]
+                casts = info.get("casts", 0)
+                if info.get("is_success") and min_casts <= casts <= max_casts:
+                    elites.append(seed)
+                    print(f"[eval] seed {seed}: success (casts={casts})")
+                break
+        if len(elites) >= n_to_find:
+            break
+    return elites
+
+
+def _render_ppo_gif(agent, seed, env_kind, gif_path):
+    vec = agent.vec_env
+    vec.seed(seed)
+    obs = vec.reset()
+    raw_env = vec.envs[0].unwrapped
+
+    lstm_states, ep_starts = None, np.ones((1,), dtype=bool)
+    frames, traj_x, traj_y, cx, cy = [], [], [], [], []
+    print(f"[eval] rendering GIF for seed {seed}")
+    for t in range(300):
+        action, lstm_states = agent.predict(
+            obs, state=lstm_states, episode_start=ep_starts, deterministic=True
         )
+        curr_x, curr_y = raw_env.x, raw_env.y
+        if int(np.rint(action[0, 2])) == 1 or raw_env.in_cast:
+            cx.append(curr_x); cy.append(curr_y)
+        traj_x.append(curr_x); traj_y.append(curr_y)
 
-        while not done:
-            if agent_type == "rsac":
+        frames.append(render_rollout_frame(
+            raw_env, traj_x, traj_y, cx, cy, t,
+            title=f"PPO seed={seed} step={t}",
+        ))
+
+        obs, _, done, _ = vec.step(action)
+        ep_starts = done
+        if done[0]:
+            break
+
+    save_gif(frames, gif_path, fps=15)
+
+
+# ---------------------------------------------------------------------------
+# RSAC / DRQN eval
+# ---------------------------------------------------------------------------
+
+
+def eval_episode_loop(args, run_dir):
+    env_kind = args.rsac_env_kind if args.agent_type == "rsac" else args.drqn_env_kind
+    env = make_env(env_kind)
+    device = _device(args)
+    agent = make_agent(args, env, device)
+
+    ckpt = args.ckpt or os.path.join(run_dir, "checkpoints", "best.pt")
+    if not os.path.exists(ckpt):
+        ckpt = os.path.join(run_dir, "checkpoints", "final.pt")
+    agent.load(ckpt)
+    print(f"[eval] loaded {ckpt}")
+
+    rets, succ = [], []
+    best_seed, best_ret = None, -float("inf")
+
+    for i in range(args.eval_episodes):
+        seed = args.seed_base + i
+        obs, _ = env.reset(seed=seed)
+        h = None
+        ep_ret, success = 0.0, False
+        while True:
+            if args.agent_type == "rsac":
                 action, h = agent.get_action_deterministic(obs, h)
+                env_action = action
             else:
-                action, h = agent.get_action(obs, h, epsilon=0.0)
-            obs, _, term, trunc, _ = env_gif.step(action)
-            done = term or trunc
+                a_idx, h = agent.get_action_deterministic(obs, h)
+                env_action = agent.to_env_action(a_idx)
+            obs, r, terminated, truncated, info = env.step(env_action)
+            ep_ret += float(r)
+            if info.get("is_success"):
+                success = True
+            if terminated or truncated:
+                break
 
-            frames.append(
-                plotter.render_rollout_frame_png_style(
-                    env_gif,
-                    title=f"Eval: {ckpt_name} | best return seed={gif_seed} | return={gif_return:.2f}",
-                )
-            )
-        
-        env_gif.close()
-        
-        gif_path = os.path.join(plots_dir, "best_agent.gif")
-        if frames:
-            plotter.save_gif(frames, gif_path, fps=30)
+        rets.append(ep_ret)
+        succ.append(float(success))
+        if ep_ret > best_ret:
+            best_ret, best_seed = ep_ret, seed
+
+    print(f"[eval] success_rate={np.mean(succ):.3f}  avg_return={np.mean(rets):.2f}")
+
+    if args.save_gif and best_seed is not None:
+        _render_episode_loop_gif(agent, env, best_seed, args, run_dir)
+
+
+def _render_episode_loop_gif(agent, env, seed, args, run_dir):
+    obs, _ = env.reset(seed=seed)
+    h = None
+    frames, traj_x, traj_y, cx, cy = [], [], [], [], []
+    for t in range(300):
+        if args.agent_type == "rsac":
+            action, h = agent.get_action_deterministic(obs, h)
+            env_action = action
+            cast_taken = int(np.rint(action[2])) == 1
         else:
-            print("[Warn] GIF skipped: no render frames were produced.")
+            a_idx, h = agent.get_action_deterministic(obs, h)
+            env_action = agent.to_env_action(a_idx)
+            cast_taken = (a_idx == 1)
 
-    if args.plot_milestones:
-        milestone_path = os.path.join(args.run_dir, "plot_data", "milestones.json")
-        ms = {}
-        if os.path.exists(milestone_path):
-            with open(milestone_path, "r") as f:
-                ms = json.load(f)
+        traj_x.append(env.x); traj_y.append(env.y)
+        if cast_taken or getattr(env, "in_cast", False):
+            cx.append(env.x); cy.append(env.y)
 
-        first_ckpt = os.path.join(args.run_dir, "checkpoints", "first.pt")
-        if not os.path.exists(first_ckpt):
-            # backward compatibility with older runs
-            first_ckpt = os.path.join(args.run_dir, "checkpoints", "ep100.pt")
+        frames.append(render_rollout_frame(
+            env, traj_x, traj_y, cx, cy, t,
+            title=f"{args.agent_type.upper()} seed={seed} step={t}",
+        ))
 
-        ckpt_map = [
-            ("first", first_ckpt, int(ms.get("first_ep", -1))),
-            ("mid", os.path.join(args.run_dir, "checkpoints", "mid.pt"), int(ms.get("mid_saved_ep", -1))),
-            ("best", os.path.join(args.run_dir, "checkpoints", "best.pt"), int(ms.get("best_ep", -1))),
-        ]
+        obs, _, terminated, truncated, _ = env.step(env_action)
+        if terminated or truncated:
+            break
 
-        plotted_any = False
-        for label, ckpt_i, ep_i in ckpt_map:
-            if not os.path.exists(ckpt_i):
-                continue
-            try:
-                agent.load(ckpt_i)
-            except Exception as e:
-                print(f"[Warn] milestone load failed ({label}): {e}")
-                continue
-            env_m = env_cls(**env_kwargs)
-            traj_i, _ = _rollout_trajectories(env_m, agent, agent_type, args.episodes, args.seed_base)
-            env_m.close()
-            ep_text = f"ep={ep_i}" if ep_i >= 1 else "ep=unknown"
-            title_i = f"Eval {label} ({ep_text})"
-            out_png = os.path.join(plots_dir, f"trajectory_{label}.png")
-            plotter.plot_trajs_png(env_kwargs, out_png, traj_i, title_i)
-            plotted_any = True
+    save_gif(frames, os.path.join(run_dir, "plots", "best_agent.gif"), fps=15)
 
-        if not plotted_any:
-            print("[Warn] No milestone checkpoints found for trajectory plotting.")
+
+# ---------------------------------------------------------------------------
+# Entry
+# ---------------------------------------------------------------------------
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.run_dir is None:
+        raise ValueError("--run-dir is required for evaluation.")
+    if args.episodes is not None:
+        args.eval_episodes = args.episodes
+
+    conf = _load_conf(args.run_dir)
+    args = _apply_conf_overrides(args, conf)
+    set_global_seed(args.seed)
+
+    if args.agent_type == "ppo":
+        eval_ppo(args, args.run_dir)
+    else:
+        eval_episode_loop(args, args.run_dir)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run-dir", type=str, required=True)
-    parser.add_argument("--ckpt", type=str, default=None)
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--seed-base", type=int, default=20000)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--force-cpu", action="store_true")
-    parser.add_argument("--rsac-actor-backbone", choices=["gru", "connectome", "connectome2"], default=None)
-    parser.add_argument("--connectome-steps", type=int, default=None)
-    parser.add_argument("--connectome-hidden", type=int, default=None)
-    parser.add_argument(
-        "--save-gif",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Save rollout GIF (default: True)",
-    )
-    parser.add_argument(
-        "--plot-milestones",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Render milestone trajectories (first/mid/best) when available",
-    )
-
-    args = parser.parse_args()
-    evaluate(args)
+    main()

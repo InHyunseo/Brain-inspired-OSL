@@ -1,331 +1,190 @@
-import os
-import time
+"""Unified training entry. Branches on --agent-type {ppo, rsac, drqn}.
+
+PPO  : sb3 RecurrentPPO + 4-phase static->dynamic curriculum (16 SubprocVecEnv).
+RSAC : single-env episode loop with hybrid actor.
+DRQN : single-env episode loop with discrete action adapter.
+
+Outputs land under runs/{agent}_{run_name}_{timestamp}/.
+"""
 import json
+import os
 import shutil
-import tempfile
-import argparse
+import time
+
 import numpy as np
 import torch
 
 from src.utils.buffer import EpisodeReplayBuffer
-from src.utils import plotter
+from src.utils.config import build_parser, parse_phases
+from src.utils.factory import make_agent, make_env
+from src.utils.plotter import plot_training_pngs_from_data, save_training_plot_data
 from src.utils.seed import set_global_seed
-from src.utils.factory import build_env_kwargs, make_env, make_agent
 
 
-
-def _safe_exists(path):
-    try:
-        return os.path.exists(path)
-    except OSError:
-        return False
-
-
-def _default_recovery_root():
-    # Prefer local Colab runtime storage when available.
-    if _safe_exists("/content"):
-        return "/content/osl_recovery"
-    return "/tmp/osl_recovery"
+def _make_run_dir(args):
+    if args.run_dir is not None:
+        os.makedirs(args.run_dir, exist_ok=True)
+        return args.run_dir
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    name = args.run_name or "main"
+    run_dir = os.path.join(args.out_dir, f"{args.agent_type}_{name}_{timestamp}")
+    for sub in ("checkpoints", "plots", "plot_data"):
+        os.makedirs(os.path.join(run_dir, sub), exist_ok=True)
+    return run_dir
 
 
-def train(args):
-    set_global_seed(args.seed)
-    first_milestone_ep = 100
-    mid_snapshot_every = 10
+def _dump_config(run_dir, args):
+    with open(os.path.join(run_dir, "config.json"), "w") as f:
+        json.dump(vars(args), f, indent=2, default=str)
 
-    # 1. Setup
-    run_name = args.run_name or time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
-    run_dir = os.path.abspath(os.path.join(args.out_dir, run_name))
-    ckpt_dir = os.path.join(run_dir, "checkpoints")
-    recovery_root = os.environ.get("OSL_RECOVERY_DIR", _default_recovery_root())
-    recovery_run_dir = os.path.join(recovery_root, run_name)
-    recovery_ckpt_dir = os.path.join(recovery_run_dir, "checkpoints")
-    primary_io_ok = True
-    try:
-        os.makedirs(ckpt_dir, exist_ok=True)
-    except OSError as e:
-        primary_io_ok = False
-        print(f"[Warn] Primary output dir unavailable ({ckpt_dir}): {e}")
-    os.makedirs(recovery_ckpt_dir, exist_ok=True)
-    tmp_mid_ctx = tempfile.TemporaryDirectory(prefix=f"{run_name}_mid_", dir="/tmp")
-    tmp_mid_dir = tmp_mid_ctx.name
-    
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.force_cpu else "cpu")
-    
-    # Save Config
-    if primary_io_ok:
-        try:
-            with open(os.path.join(run_dir, "config.json"), "w") as f:
-                json.dump(vars(args), f, indent=2)
-        except OSError as e:
-            primary_io_ok = False
-            print(f"[Warn] Failed to write primary config.json: {e}")
-    with open(os.path.join(recovery_run_dir, "config.json"), "w") as f:
-        json.dump(vars(args), f, indent=2)
 
-    # 2. Init
-    env_kwargs = build_env_kwargs(args)
-    env = make_env(args.env_id, **env_kwargs)
-    env.action_space.seed(args.seed)
-    if hasattr(env, "observation_space") and hasattr(env.observation_space, "seed"):
-        env.observation_space.seed(args.seed)
+def _device(args):
+    if args.force_cpu or not torch.cuda.is_available():
+        return torch.device("cpu")
+    return torch.device("cuda")
+
+
+# ---------------------------------------------------------------------------
+# PPO trainer
+# ---------------------------------------------------------------------------
+
+
+def train_ppo(args, run_dir):
+    from src.callbacks import MetricsCallback
+
+    tb_log = args.tb_log or os.path.join(run_dir, "tb")
+    os.makedirs(tb_log, exist_ok=True)
+    args.tb_log = tb_log
+
+    agent = make_agent(args, env=None, device=_device(args))
+
+    phases = parse_phases(args)
+    if not phases:
+        raise ValueError("No phases specified for PPO training.")
+
+    callback = MetricsCallback()
+    prev_vecnorm = None
+    for i, (env_kind, total_steps) in enumerate(phases):
+        print(f"\n=== PPO Phase {i}: {env_kind} ({total_steps} steps) ===")
+        agent.learn_phase(
+            env_kind=env_kind,
+            total_timesteps=total_steps,
+            n_envs=args.n_envs,
+            callback=callback,
+            vecnorm_load_path=prev_vecnorm,
+            reset_num_timesteps=(i == 0),
+        )
+        model_path = os.path.join(run_dir, "checkpoints", f"phase{i}_{env_kind}.zip")
+        vnorm_path = os.path.join(run_dir, "checkpoints", f"phase{i}_{env_kind}_vnorm.pkl")
+        agent.save(model_path, vecnorm_path=vnorm_path)
+        prev_vecnorm = vnorm_path
+
+    # Aliases for downstream eval / replot scripts.
+    last_idx = len(phases) - 1
+    last_kind = phases[-1][0]
+    src_model = os.path.join(run_dir, "checkpoints", f"phase{last_idx}_{last_kind}.zip")
+    src_vnorm = os.path.join(run_dir, "checkpoints", f"phase{last_idx}_{last_kind}_vnorm.pkl")
+    if os.path.exists(src_model):
+        shutil.copyfile(src_model, os.path.join(run_dir, "checkpoints", "final.zip"))
+        shutil.copyfile(src_vnorm, os.path.join(run_dir, "checkpoints", "final_vnorm.pkl"))
+
+
+# ---------------------------------------------------------------------------
+# Episode-loop trainer for RSAC / DRQN
+# ---------------------------------------------------------------------------
+
+
+def _linear_eps(step, args):
+    frac = min(1.0, step / max(1, args.eps_decay_steps))
+    return args.eps_start + frac * (args.eps_end - args.eps_start)
+
+
+def train_episode_loop(args, run_dir):
+    env_kind = args.rsac_env_kind if args.agent_type == "rsac" else args.drqn_env_kind
+    env = make_env(env_kind)
+    device = _device(args)
     agent = make_agent(args, env, device)
-    buffer = EpisodeReplayBuffer(args.buffer_size)
+    buffer = EpisodeReplayBuffer(cap_steps=args.buffer_size)
 
-    # 3. Training Loop
-    ep_returns = []
-    ep_steps_to_goal = []
-    best_return = -np.inf
-    best_ep = 0
-    saved_eps = []
+    best_return = -float("inf")
+    ep_returns, ep_steps_to_goal = [], []
 
-    def save_checkpoint_dual(agent_obj, filename):
-        nonlocal primary_io_ok
-        wrote_any = False
-        if primary_io_ok:
-            try:
-                agent_obj.save(os.path.join(ckpt_dir, filename))
-                wrote_any = True
-            except OSError as e:
-                primary_io_ok = False
-                print(f"[Warn] Primary checkpoint save failed ({filename}): {e}")
-        try:
-            agent_obj.save(os.path.join(recovery_ckpt_dir, filename))
-            wrote_any = True
-        except OSError as e:
-            print(f"[Warn] Recovery checkpoint save failed ({filename}): {e}")
-        return wrote_any
+    for ep in range(1, args.total_episodes + 1):
+        obs, _ = env.reset(seed=args.seed + ep)
+        h = None
+        traj = []
+        ep_ret = 0.0
+        steps_in_ep = 0
+        success_step = None
 
-
-    interrupted = False
-    try:
-        for ep in range(1, args.total_episodes + 1):
-            obs, _ = env.reset(seed=args.seed + ep)
-            h = None
-            done = False
-            ep_ret = 0
-            traj = []
-            step_count = 0
-            first_goal_step = None
-
-            frac = min(1.0, (ep / args.eps_decay_steps))
-            epsilon = args.eps_start - frac * (args.eps_start - args.eps_end)
-            log_stats = None
-
-            is_rsac = (args.agent_type == "rsac")
-            get_action = agent.get_action
-            step_env = env.step
-            sample_batch = buffer.sample_continuous if is_rsac else buffer.sample
-
-            while not done:
-                if is_rsac:
-                    action, h_next = get_action(obs, h, epsilon=1.0)
-                else:
-                    action, h_next = get_action(obs, h, epsilon)
-
-                next_obs, reward, term, trunc, info = step_env(action)
-                done = bool(term or trunc)
-                terminal = float(term)
-                step_count += 1
-
-                if first_goal_step is None and info.get("in_goal", 0):
-                    first_goal_step = step_count
-
-                traj.append((obs, action, float(reward), next_obs, terminal))
-                obs = next_obs
-                h = h_next
-                ep_ret += reward
-
-                if len(buffer) > args.learning_starts and len(buffer) > args.batch_size * args.seq_len:
-                    batch = sample_batch(args.batch_size, args.seq_len)
-                    log_stats = agent.update(batch)
-
-            buffer.add_episode(traj)
-            ep_returns.append(ep_ret)
-            if first_goal_step is None:
-                ep_steps_to_goal.append(step_count)
+        while True:
+            if args.agent_type == "rsac":
+                action, h = agent.get_action(obs, h)
+                env_action = action
             else:
-                ep_steps_to_goal.append(first_goal_step)
+                eps = _linear_eps(ep, args)
+                a_idx, h = agent.get_action(obs, h, epsilon=eps)
+                action = a_idx
+                env_action = agent.to_env_action(a_idx)
 
-            if ep_ret > best_return:
-                best_return = ep_ret
-                best_ep = ep
-                save_checkpoint_dual(agent, "best.pt")
+            next_obs, reward, terminated, truncated, info = env.step(env_action)
+            done = bool(terminated or truncated)
+            terminal = float(terminated)
+            traj.append((obs, action, float(reward), next_obs, terminal))
 
-            if ep == first_milestone_ep:
-                save_checkpoint_dual(agent, "first.pt")
+            obs = next_obs
+            ep_ret += float(reward)
+            steps_in_ep += 1
+            if info.get("is_success") and success_step is None:
+                success_step = steps_in_ep
+            if done:
+                break
 
-            if ep >= first_milestone_ep and ep % mid_snapshot_every == 0:
-                pep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                try:
-                    agent.save(pep)
-                    if ep not in saved_eps:
-                        saved_eps.append(ep)
-                except OSError as e:
-                    print(f"[Warn] Temporary snapshot save failed ({pep}): {e}")
+        buffer.add_episode(traj)
+        ep_returns.append(ep_ret)
+        ep_steps_to_goal.append(success_step if success_step is not None else steps_in_ep)
 
-            if args.agent_type != "rsac" and ep % args.target_update_every == 0:
+        if len(buffer) >= args.learning_starts:
+            sampler = buffer.sample_continuous if args.agent_type == "rsac" else buffer.sample
+            batch = sampler(args.batch_size, args.seq_len)
+            agent.update(batch)
+            if args.agent_type == "drqn" and ep % args.target_update_every == 0:
                 agent.sync_target()
 
-            if ep % args.log_every == 0:
-                avg_ret = np.mean(ep_returns[-args.log_every:])
-                avg_steps = np.mean(ep_steps_to_goal[-args.log_every:])
-                if args.agent_type == "rsac" and isinstance(log_stats, dict):
-                    print(
-                        f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} "
-                        f"| alpha: {log_stats['alpha']:.4f} | td|: {log_stats['td_abs']:.4f}"
-                    )
-                else:
-                    print(
-                        f"Ep {ep} | Avg Ret: {avg_ret:.2f} | Avg Step-to-Goal: {avg_steps:.1f} | Eps: {epsilon:.3f}"
-                    )
+        if ep_ret > best_return:
+            best_return = ep_ret
+            agent.save(os.path.join(run_dir, "checkpoints", "best.pt"))
+        if ep == 100:
+            agent.save(os.path.join(run_dir, "checkpoints", "first.pt"))
 
-    except KeyboardInterrupt:
-        interrupted = True
-        print("\n[Warn] Training interrupted. Saving partial artifacts...")
-    finally:
-        if best_ep > 0:
-            first_primary = os.path.join(ckpt_dir, "first.pt")
-            first_recovery = os.path.join(recovery_ckpt_dir, "first.pt")
-            best_primary = os.path.join(ckpt_dir, "best.pt")
-            best_recovery = os.path.join(recovery_ckpt_dir, "best.pt")
+        if ep % args.log_every == 0:
+            recent = ep_returns[-args.log_every:]
+            print(f"[ep {ep:5d}] return={ep_ret:7.2f}  recent_mean={np.mean(recent):7.2f}"
+                  f"  steps={steps_in_ep}  buffer={len(buffer)}")
 
-            cands = []
-            if _safe_exists(best_primary):
-                cands.append((int(best_ep), best_primary))
-            if _safe_exists(best_recovery):
-                cands.append((int(best_ep), best_recovery))
-            if not cands:
-                p_best_tmp = os.path.join(tmp_mid_dir, f"ep_{best_ep}.pt")
-                if _safe_exists(p_best_tmp):
-                    cands = [(int(best_ep), p_best_tmp)]
+    agent.save(os.path.join(run_dir, "checkpoints", "final.pt"))
+    save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal)
+    plot_training_pngs_from_data(run_dir)
 
-            if cands:
-                first_ep = -1
-                first_path = None
-                if _safe_exists(first_primary):
-                    first_path = first_primary
-                elif _safe_exists(first_recovery):
-                    first_path = first_recovery
-                if first_path is not None:
-                    first_ep = int(first_milestone_ep)
-                    cands.append((first_ep, first_path))
 
-                lo = min(ep for ep, _ in cands)
-                hi = max(ep for ep, _ in cands)
-                mid_target = (lo + hi) // 2
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.episodes is not None:
+        args.eval_episodes = args.episodes
 
-                for ep in sorted(set(saved_eps)):
-                    if lo <= ep <= hi:
-                        p_ep = os.path.join(tmp_mid_dir, f"ep_{ep}.pt")
-                        if _safe_exists(p_ep):
-                            cands.append((int(ep), p_ep))
+    set_global_seed(args.seed)
+    run_dir = _make_run_dir(args)
+    _dump_config(run_dir, args)
+    print(f"[run_dir] {run_dir}")
 
-                mid_ep, mid_src = min(cands, key=lambda item: abs(item[0] - mid_target))
-                if primary_io_ok:
-                    try:
-                        shutil.copy2(mid_src, os.path.join(ckpt_dir, "mid.pt"))
-                    except OSError as e:
-                        primary_io_ok = False
-                        print(f"[Warn] Primary mid checkpoint copy failed: {e}")
-                try:
-                    shutil.copy2(mid_src, os.path.join(recovery_ckpt_dir, "mid.pt"))
-                except OSError as e:
-                    print(f"[Warn] Recovery mid checkpoint copy failed: {e}")
+    if args.agent_type == "ppo":
+        train_ppo(args, run_dir)
+    else:
+        train_episode_loop(args, run_dir)
 
-                milestone_meta = {
-                    "first_ep": int(first_ep),
-                    "best_ep": int(best_ep),
-                    "mid_target_ep": int(mid_target),
-                    "mid_saved_ep": int(mid_ep),
-                    "mid_snapshot_every": int(mid_snapshot_every),
-                }
-                for base_dir, enabled in ((run_dir, primary_io_ok), (recovery_run_dir, True)):
-                    if not enabled:
-                        continue
-                    try:
-                        os.makedirs(os.path.join(base_dir, "plot_data"), exist_ok=True)
-                        with open(os.path.join(base_dir, "plot_data", "milestones.json"), "w") as f:
-                            json.dump(milestone_meta, f, indent=2)
-                    except OSError as e:
-                        if base_dir == run_dir:
-                            primary_io_ok = False
-                        print(f"[Warn] Failed to write milestones.json in {base_dir}: {e}")
-            else:
-                print("[Warn] No checkpoint available for milestone metadata generation.")
+    print(f"\n[done] artifacts saved to {run_dir}")
+    return run_dir
 
-        tmp_mid_ctx.cleanup()
-
-        if ep_returns:
-            if primary_io_ok:
-                try:
-                    plotter.save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
-                    plotter.plot_training_pngs_from_data(run_dir)
-                except OSError as e:
-                    primary_io_ok = False
-                    print(f"[Warn] Failed to save primary training plots: {e}")
-            try:
-                plotter.save_training_plot_data(recovery_run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.05)
-                plotter.plot_training_pngs_from_data(recovery_run_dir)
-            except OSError as e:
-                print(f"[Warn] Failed to save recovery training plots: {e}")
-        env.close()
-    if interrupted:
-        raise KeyboardInterrupt
-
-    preferred_run_dir = run_dir if primary_io_ok and _safe_exists(run_dir) else recovery_run_dir
-    if preferred_run_dir == recovery_run_dir:
-        print(f"[Info] Using recovery output directory: {recovery_run_dir}")
-    return {
-        "run_dir": preferred_run_dir,
-        "primary_run_dir": run_dir,
-        "recovery_run_dir": recovery_run_dir,
-    }
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--env-id", default="OdorHold-v4")
-    p.add_argument("--agent-type", choices=["drqn", "dqn", "rsac"], default="drqn")
-    p.add_argument("--total-episodes", type=int, default=600)
-    p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--rnn-hidden", type=int, default=147)
-    p.add_argument("--dqn-hidden", type=int, default=256)
-    p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--lr-actor", type=float, default=3e-4)
-    p.add_argument("--lr-critic", type=float, default=3e-4)
-    p.add_argument("--lr-alpha", type=float, default=3e-4)
-    p.add_argument("--out-dir", default="runs")
-    p.add_argument("--run-name", default=None)
-    p.add_argument("--src-x", type=float, default=0.0)
-    p.add_argument("--src-y", type=float, default=0.0)
-    p.add_argument("--wind-x", type=float, default=0.0)
-    p.add_argument("--sigma-c", type=float, default=1.0)
-    p.add_argument("--reward-mode", choices=["mechanical", "bio"], default="bio")
-    p.add_argument("--bio-reward-scale", type=float, default=0.5)
-    p.add_argument("--cast-penalty", type=float, default=0.025)
-    p.add_argument("--turn-penalty", type=float, default=0.01)
-    p.add_argument("--b-hold", type=float, default=0.5)
-    p.add_argument("--goal-hold-steps", type=int, default=20)
-    p.add_argument("--terminate-on-hold", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--gamma", type=float, default=0.99)
-    p.add_argument("--tau", type=float, default=0.005)
-    p.add_argument("--rsac-actor-backbone", choices=["gru", "connectome", "connectome2"], default="gru")
-    p.add_argument("--connectome-steps", type=int, default=4)
-    p.add_argument("--connectome-hidden", type=int, default=180)
-    
-    # Hyperparams
-    p.add_argument("--buffer-size", type=int, default=150000)
-    p.add_argument("--seq-len", type=int, default=16)
-    p.add_argument("--learning-starts", type=int, default=5000) # steps가 아니라 buffer size 체크용
-    p.add_argument("--target-update-every", type=int, default=20) # episode 단위
-    p.add_argument("--eps-start", type=float, default=1.0)
-    p.add_argument("--eps-end", type=float, default=0.05)
-    p.add_argument("--eps-decay-steps", type=int, default=4000) # episode 단위
-    p.add_argument("--log-every", type=int, default=20)
-    p.add_argument("--force-cpu", action="store_true")
-
-    args = p.parse_args()
-    if args.run_name is None:
-        args.run_name = time.strftime(f"{args.agent_type}_%Y%m%d_%H%M%S")
-    train(args)
+    main()

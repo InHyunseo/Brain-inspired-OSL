@@ -1,14 +1,18 @@
+"""Recurrent SAC for the 2D OSL env (hybrid Box([v, omega, cast]))."""
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from src.models.networks import (
-    Connectome2HybridActor,
-    ConnectomeHybridActor,
-    RecurrentHybridActor,
-    RecurrentQCritic,
+    ConnectomeActor,
+    GRUActor,
+    MLPActor,
+    QCritic,
 )
+
+
+_BACKBONES = {"gru", "connectome", "mlp"}
 
 
 class RSACAgent:
@@ -34,55 +38,39 @@ class RSACAgent:
         self.tau = float(tau)
         self.act_dim = int(act_dim)
         self.actor_backbone = str(actor_backbone).lower()
+        if self.actor_backbone not in _BACKBONES:
+            raise ValueError(f"Unsupported actor_backbone {self.actor_backbone}; pick from {_BACKBONES}.")
         if self.act_dim != 3:
             raise ValueError("RSACAgent expects action dim exactly 3: [v, omega, cast].")
 
         self.action_low = torch.as_tensor(action_low, dtype=torch.float32, device=device)
         self.action_high = torch.as_tensor(action_high, dtype=torch.float32, device=device)
-        if self.action_low.numel() != 3 or self.action_high.numel() != 3:
-            raise ValueError("RSACAgent expects action bounds with 3 elements: [v, omega, cast].")
 
-        if self.actor_backbone == "connectome":
-            self.actor = ConnectomeHybridActor(
-                obs_dim,
-                cont_act_dim=2,
-                hidden=connectome_hidden,
-                connectome_steps=connectome_steps,
+        if self.actor_backbone == "gru":
+            self.actor = GRUActor(obs_dim, cont_act_dim=2, hidden=rnn_hidden).to(device)
+        elif self.actor_backbone == "connectome":
+            self.actor = ConnectomeActor(
+                obs_dim, cont_act_dim=2,
+                hidden=connectome_hidden, connectome_steps=connectome_steps,
             ).to(device)
-        elif self.actor_backbone == "connectome2":
-            self.actor = Connectome2HybridActor(
-                obs_dim,
-                cont_act_dim=2,
-                hidden=connectome_hidden,
-                connectome_steps=connectome_steps,
-            ).to(device)
-        elif self.actor_backbone == "gru":
-            self.actor = RecurrentHybridActor(
-                obs_dim,
-                cont_act_dim=2,
-                hidden=rnn_hidden,
-            ).to(device)
-        else:
-            raise ValueError(
-                f"Unsupported actor_backbone: {self.actor_backbone}. "
-                "Use 'gru', 'connectome', or 'connectome2'."
-            )
+        else:  # mlp
+            self.actor = MLPActor(obs_dim, cont_act_dim=2, hidden=rnn_hidden).to(device)
 
-        self.q1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
-        self.q2 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
-        self.tq1 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
-        self.tq2 = RecurrentQCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.q1 = QCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.q2 = QCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.tq1 = QCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
+        self.tq2 = QCritic(obs_dim, act_dim, hidden=rnn_hidden).to(device)
         self.tq1.load_state_dict(self.q1.state_dict())
         self.tq2.load_state_dict(self.q2.state_dict())
 
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=lr_actor)
-        self.critic_opt = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=lr_critic)
+        self.critic_opt = optim.Adam(
+            list(self.q1.parameters()) + list(self.q2.parameters()), lr=lr_critic
+        )
 
         self.log_alpha = torch.zeros(1, device=device, requires_grad=True)
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr_alpha)
-        # Hybrid entropy target:
-        # - continuous [v, omega]: SAC default ~= -dim_cont
-        # - binary cast action: -0.5 * log(2) (encourages some stochasticity without dominating)
+        # Hybrid entropy target: -dim_cont for Gaussian, -0.5*log(2) for cast Bernoulli.
         self.target_entropy = -(2.0 + 0.5 * float(np.log(2.0)))
 
         self.loss_fn = nn.SmoothL1Loss()
@@ -91,8 +79,7 @@ class RSACAgent:
     def alpha(self):
         return self.log_alpha.exp()
 
-    def get_action(self, obs, h=None, epsilon=1.0):
-        del epsilon
+    def get_action(self, obs, h=None):
         obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
             action, _, h2, _, _ = self.actor.sample(obs_t, self.action_low, self.action_high, h)
@@ -109,10 +96,10 @@ class RSACAgent:
     def update(self, batch):
         obs_seq, act_seq, rew_seq, terminal_seq = batch
 
-        obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)    # (B, T+1, D)
-        act_seq = torch.as_tensor(act_seq, dtype=torch.float32, device=self.device)    # (B, T, A)
-        rew_seq = torch.as_tensor(rew_seq, dtype=torch.float32, device=self.device)    # (B, T)
-        terminal_seq = torch.as_tensor(terminal_seq, dtype=torch.float32, device=self.device)  # (B, T)
+        obs_seq = torch.as_tensor(obs_seq, dtype=torch.float32, device=self.device)
+        act_seq = torch.as_tensor(act_seq, dtype=torch.float32, device=self.device)
+        rew_seq = torch.as_tensor(rew_seq, dtype=torch.float32, device=self.device)
+        terminal_seq = torch.as_tensor(terminal_seq, dtype=torch.float32, device=self.device)
 
         obs_t = obs_seq[:, :-1, :]
         next_obs_t = obs_seq[:, 1:, :]
@@ -149,13 +136,11 @@ class RSACAgent:
 
         self.soft_update()
 
-        td_err = (y - q1).abs().mean().item()
         return {
             "critic_loss": float(critic_loss.item()),
             "actor_loss": float(actor_loss.item()),
             "alpha_loss": float(alpha_loss.item()),
             "alpha": float(self.alpha.item()),
-            "td_abs": float(td_err),
         }
 
     def soft_update(self):
@@ -165,12 +150,8 @@ class RSACAgent:
             for p, tp in zip(self.q2.parameters(), self.tq2.parameters()):
                 tp.data.mul_(1.0 - self.tau).add_(self.tau * p.data)
 
-    def sync_target(self):
-        # compatibility with existing training loop; SAC uses soft updates each step.
-        return None
-
     def save(self, path):
-        ckpt = {
+        torch.save({
             "actor": self.actor.state_dict(),
             "actor_backbone": self.actor_backbone,
             "q1": self.q1.state_dict(),
@@ -178,13 +159,12 @@ class RSACAgent:
             "tq1": self.tq1.state_dict(),
             "tq2": self.tq2.state_dict(),
             "log_alpha": self.log_alpha.detach().cpu(),
-        }
-        torch.save(ckpt, path)
+        }, path)
 
     def load(self, path):
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
         ckpt_backbone = str(ckpt.get("actor_backbone", "gru")).lower()
-        if str(ckpt_backbone).lower() != self.actor_backbone:
+        if ckpt_backbone != self.actor_backbone:
             raise ValueError(
                 f"Checkpoint actor_backbone={ckpt_backbone} but agent actor_backbone={self.actor_backbone}."
             )

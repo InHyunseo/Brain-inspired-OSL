@@ -1,140 +1,138 @@
 # Manual
 
 ## Environment
-- OS: Ubuntu 22.04 (WSL2 포함)
-- Python: 3.10.x
+- Ubuntu 22.04 (WSL2 가능), Python 3.10
+- `sb3-contrib`의 `RecurrentPPO`는 gymnasium 0.29 + numpy<2 에서 안정
 
 ## Setup
 ```bash
-cd ~/osl_project
+cd ~/Personal_Research/OSL
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 ## Run Commands
 
-### 1. End-to-End (Train + Eval + Plot)
+### PPO (기본, 4-phase curriculum)
 ```bash
-python3 main.py --agent-type rsac --env-id OdorHold-v4 --total-episodes 20000
+python3 train.py --agent-type ppo
+```
+phase 진행 후 `runs/ppo_main_*/checkpoints/phase{i}_{kind}.zip` + `*_vnorm.pkl` 저장.
+
+#### 더 짧은 1-phase 학습 (디버깅)
+```bash
+python3 train.py --agent-type ppo \
+  --phases '[["static", 50000]]' --n-envs 4
 ```
 
-### 2. Train Only
+### RSAC
 ```bash
-python3 train.py --agent-type rsac --env-id OdorHold-v4 --total-episodes 20000 --out-dir runs
+python3 train.py --agent-type rsac \
+  --rsac-actor-backbone connectome \
+  --connectome-hidden 180 --connectome-steps 4 \
+  --total-episodes 20000
+```
+- `--rsac-actor-backbone {gru, connectome, mlp}`
+- `--connectome-hidden`은 90의 배수 (default 180)
+
+### DRQN / DQN
+```bash
+# DRQN (recurrent)
+python3 train.py --agent-type drqn --total-episodes 20000
+
+# vanilla DQN (no recurrence)
+python3 train.py --agent-type drqn --no-drqn-recurrent --total-episodes 20000
 ```
 
-### 2-1. Train (Connectome Actor, `seq_len` 낮춰서 시도)
+### End-to-end (train + eval)
 ```bash
-python3 train.py \
-  --agent-type rsac \
-  --env-id OdorHold-v4 \
-  --total-episodes 20000 \
-  --rsac-actor-backbone connectome2 \
-  --connectome-hidden 180 \
-  --connectome-steps 4 \
-  --seq-len 6
+python3 main.py --agent-type ppo
 ```
 
-### 3. Eval Only
+### Eval only
 ```bash
-python3 eval.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --episodes 50 --no-save-gif
+python3 eval.py --run-dir runs/ppo_main_YYYYMMDD_HHMMSS --episodes 50
+```
+PPO는 `final.zip` + `final_vnorm.pkl`을 로드, elite seed 탐색 후 GIF 렌더.
+RSAC/DRQN은 `best.pt` (없으면 `final.pt`) 로드, 베스트 return episode의 GIF 렌더.
+
+### Replot
+```bash
+python3 replot.py --run-dir runs/<agent>_main_YYYYMMDD_HHMMSS
 ```
 
-### 4. Replot
-- `train` 대상: 저장된 `plot_data`에서 학습 그래프 재생성
-- `eval` 대상: 체크포인트로 다시 롤아웃해 trajectory 재생성
+## Common Arguments (`train.py`)
 
-```bash
-python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target all
-python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target train
-python3 replot.py --run-dir runs/{agent}_main_YYYYMMDD_HHMMSS --target eval --episodes 50
+### 공통
+- `--agent-type {ppo, rsac, drqn}` (default `ppo`)
+- `--seed`, `--force-cpu`, `--out-dir`, `--run-name`
+
+### PPO
+- `--phases` (JSON list, default 4-phase curriculum)
+- `--n-envs` (default 16), `--features-dim` (default 180, 90의 배수)
+- `--ppo-lr` (3e-4), `--ppo-batch-size` (256), `--ppo-n-steps` (128), `--ppo-ent-coef` (0.01)
+- `--tb-log` (default `<run_dir>/tb`)
+
+### RSAC
+- `--rsac-actor-backbone {gru, connectome, mlp}` (default `gru`)
+- `--connectome-hidden` (default 180, 90의 배수), `--connectome-steps` (default 4)
+- `--rnn-hidden` (default 147)
+- `--lr-actor / --lr-critic / --lr-alpha` (default 3e-4)
+- `--gamma 0.99`, `--tau 0.005`
+- `--batch-size 128`, `--seq-len 16`, `--buffer-size 150000`, `--learning-starts 5000`
+- `--rsac-env-kind {static, dynamic_0.3, dynamic_0.6, dynamic_1.0}` (default `dynamic_1.0`)
+
+### DRQN
+- `--drqn-recurrent` / `--no-drqn-recurrent` (default on, recurrent=True → DRQN)
+- `--rnn-hidden 147`, `--lr 1e-4`, `--gamma 0.99`
+- `--eps-start 1.0`, `--eps-end 0.05`, `--eps-decay-steps 4000`
+- `--target-update-every 20`
+- `--drqn-env-kind {static, dynamic_0.3, dynamic_0.6, dynamic_1.0}`
+
+### Eval-side
+- `--eval-episodes` / `--episodes` (alias), `--seed-base`, `--ckpt`
+- `--save-gif` / `--no-save-gif`
+- `--noise-coef` (PPO eval env의 DynamicEnv 강도, default 1.0)
+
+## Env API
+- obs: `[c, mode]`
+  - `c`: concentration
+  - `mode`: 직전 step에서 `did_cast` 여부 (1.0=cast, 0.0=run)
+- action: `Box([v, omega, cast_prob], shape=(3,))`
+  - `cast_prob`는 `np.rint(np.clip(., 0, 1))` 후 1이면 4-step lock cast 시작
+  - cast 시작 후 4 step 동안 `+π/2, -π/2, +π/2, -π/2` 스캔
+- reward: `0.5 * c - [cast_penalty or motion_penalty] + b_hold(in_goal) - b_oob(oob)`
+- 종료: `goal_hold_count >= 20` 성공, `|x| > L or |y| > L` 실패, `step >= 300` truncated
+
+## Output Structure (PPO)
 ```
-
-## Main Arguments (`main.py`)
-- `--env-id`: default `OdorHold-v4`
-- `--agent-type`: `drqn | dqn | rsac` (default `rsac`)
-- `--total-episodes`: default `20000`
-- `--seed`: default `42`
-- `--force-cpu`
-- `--reward-mode`: `mechanical | bio` (default `bio`)
-- `--bio-reward-scale`: default `0.5` (`reward-mode=bio`일 때 concentration shaping 계수)
-- `--cast-penalty`: default `0.025`
-- `--turn-penalty`: default `0.01`
-- `--b-hold`: default `0.5` (goal 영역 유지 보상)
-- `--goal-hold-steps`: default `20`
-- `--terminate-on-hold` / `--no-terminate-on-hold` (default terminate)
-
-### RSAC-related
-- `--lr-actor`: default `3e-4`
-- `--lr-critic`: default `3e-4`
-- `--lr-alpha`: default `3e-4`
-- `--gamma`: default `0.99`
-- `--tau`: default `0.005`
-- `--rnn-hidden`: default `147`
-- `--rsac-actor-backbone`: `gru | connectome | connectome2` (default `gru`)
-- `--connectome-hidden`: default `180` (`connectome2`는 `90`의 배수이면서 `>= 180` 필요)
-- `--connectome-steps`: default `4`
-- `--batch-size`: default `128`
-- `--seq-len`: default `16` (`connectome2` 실험에서는 `--seq-len 6`부터 확인 권장)
-- `--buffer-size`: default `150000`
-- `--learning-starts`: default `5000`
-
-### Eval
-- `--eval-episodes`: default `100`
-- `--seed-base`: default `20000`
-- `--rsac-actor-backbone`: `gru | connectome | connectome2` (기본은 run config 사용, 지정 시 override)
-- `--connectome-steps`: 지정 시 run config override
-- `--connectome-hidden`: 지정 시 run config override
-- `--save-gif` / `--no-save-gif` (default save)
-- `--plot-milestones` / `--no-plot-milestones` (default plot)
-
-## Notes
-- `RSAC`에서는 `--eps-start/--eps-end/--eps-decay-steps`가 실질적으로 사용되지 않습니다.
-- 현재 connectome 계열 실험은 `connectome2` 사용을 권장합니다. 기존 `connectome`은 코드에 남아 있지만 주 실험 대상으로는 사용하지 않습니다.
-- `OdorHold-v3`/`OdorHold-v4`의 spawn sampler는 balanced 방식으로 고정되어 있습니다.
-- `OdorHold-v4`의 `reward-mode=mechanical`은 전통 RL shaping(거리 기반 + 행동비용)입니다.
-- `OdorHold-v4`의 `reward-mode=bio`는 mechanical과 동일한 보상 구조에서 거리 shaping(`exp(-d/sigma_r)`)만 농도 shaping(`bio_reward_scale * c`)으로 바꿉니다.
-- `goal/hold` 판정(`d < r_goal`)과 종료 조건은 `mechanical`/`bio` 공통입니다.
-- `first.pt`는 `ep100`에서 생성되며, `mid.pt`는 `best.pt`와 `first.pt` 사이 중간 시점에 가장 가까운 스냅샷으로 저장됩니다.
-- 중간 학습 중에도 `eval.py` 실행 시 체크포인트가 있으면 `trajectory_first/mid/best.png`를 생성합니다.
-- `best_agent.gif`는 evaluation에서 측정한 episode들 중 return이 가장 높은 rollout을 다시 렌더링한 결과입니다.
-- Colab/Drive 연결이 끊겨도 학습 산출물은 로컬 복구 경로(`OSL_RECOVERY_DIR` 또는 기본 `/content/osl_recovery`, 비-Colab은 `/tmp/osl_recovery`)에 함께 저장됩니다.
-
-## Output Structure
-```text
-runs/{agent}_main_YYYYMMDD_HHMMSS/
+runs/ppo_main_YYYYMMDD_HHMMSS/
 ├── checkpoints/
-│   ├── best.pt
-│   ├── final.pt
-│   ├── first.pt
-│   └── mid.pt
-├── plots/
-│   ├── returns.png
-│   ├── steps_to_goal.png
-│   ├── trajectory_first.png    # checkpoint 존재 시
-│   ├── trajectory_mid.png      # checkpoint 존재 시
-│   ├── trajectory_best.png     # checkpoint 존재 시
-│   └── best_agent.gif          # save-gif일 때
-├── plot_data/
-│   ├── training_metrics.json
-│   ├── returns.csv
-│   ├── steps_to_goal.csv
-│   └── milestones.json
+│   ├── phase0_static.zip
+│   ├── phase0_static_vnorm.pkl
+│   ├── phase1_dynamic_0.3.zip
+│   ├── phase1_dynamic_0.3_vnorm.pkl
+│   ├── ...
+│   ├── final.zip
+│   └── final_vnorm.pkl
+├── plots/best_agent.gif
+├── tb/                       # TensorBoard event files
 └── config.json
 ```
 
-## Env v4 Action/Observation
-- action: `[v_cmd, omega_cmd, cast_cmd]`
-- obs: `[c, mode]`
-  - `c`: concentration
-  - `mode`: `0=run`, `1=cast`
+## Output Structure (RSAC / DRQN)
+```
+runs/{agent}_main_YYYYMMDD_HHMMSS/
+├── checkpoints/{best,first,final}.pt
+├── plots/{returns.png, steps_to_goal.png, best_agent.gif}
+├── plot_data/{training_metrics.json, returns.csv, steps_to_goal.csv}
+└── config.json
+```
 
-## Eval Console Metrics
-- `Success Rate`
-- `Avg Return`
-- `Avg Cast Starts`
-- `Avg Cast Steps`
-- `Cast Step %`
-- `Can-Turn %`
+## Notes
+- `sb3-contrib`의 `RecurrentPPO`는 numpy<2 권장 — `requirements.txt`는 `numpy==1.26.4`로
+  설정. 환경에 따라 sb3 2.3+가 numpy 2를 지원하면 상향 가능.
+- `connectome_hidden=180`은 `k=2`이므로 MBON=2. 더 큰 표현력이 필요하면 `360`(k=4) 권장.
+- DRQN/DQN은 노트북에서도 동일 결과를 얻고 싶다면 `ipynb/DRQN_framework.ipynb` 사용.
