@@ -1,16 +1,18 @@
-"""Unified DRQN/DQN agent for the continuous-action OSL env.
+"""Unified DRQN/DQN agent for the legacy 2D OSL env (single sensor + cast macro).
 
-The 2D OSL env exposes Box([v, omega, cast]) actions. This agent runs over a
-discrete action set {RUN, CAST, TURN_L, TURN_R} and an internal `to_env_action`
-adapter maps each discrete choice to the continuous env action. Toggle the
-backbone between recurrent (DRQN) and feed-forward (DQN) via `recurrent`.
+The env exposes Box([v, omega, cast]) actions. This agent runs over a discrete
+action set {RUN, CAST, TURN_L, TURN_R} and `to_env_action` maps each discrete
+choice to the continuous env action. Toggle the backbone between recurrent
+(DRQN) and feed-forward (DQN) via `recurrent`.
 """
+from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.models.networks import QNet
+from demo.DRQN.qnet import QNet
 
 
 A_RUN, A_CAST, A_TURN_L, A_TURN_R = 0, 1, 2, 3

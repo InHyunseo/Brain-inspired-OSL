@@ -1,0 +1,390 @@
+local_index_1based,local_index_0based,neuron_id,celltype,side,additional_annotations,level_7_cluster,is_orn,is_left_orn,is_right_orn,is_mbon,is_left_mbon,is_right_mbon
+1,0,29,KC,right,KC,42,0,0,0,0,0,0
+2,1,40045,sensory,left,olfactory,2,1,1,0,0,0,0
+3,2,677717,KC,right,KC,49,0,0,0,0,0,0
+4,3,2568465,PN,left,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,32,0,0,0,0,0,0
+5,4,2571761,sensory,right,olfactory,2,1,0,1,0,0,0
+6,5,2582391,sensory,right,olfactory,2,1,0,1,0,0,0
+7,6,2584838,sensory,right,olfactory,2,1,0,1,0,0,0
+8,7,2608843,sensory,right,olfactory,1,1,0,1,0,0,0
+9,8,2611805,sensory,left,olfactory,2,1,1,0,0,0,0
+10,9,2612527,PN,left,mPN; Multiglomerular PN 3; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+11,10,2776773,LN,right,no official annotation,28,0,0,0,0,0,0
+12,11,2920061,LN,right,PL-4,38,0,0,0,0,0,0
+13,12,2920554,LN,right,PL-5,35,0,0,0,0,0,0
+14,13,2921933,LN,right,no official annotation,28,0,0,0,0,0,0
+15,14,2935198,LN,right,no official annotation,56,0,0,0,0,0,0
+16,15,3158543,sensory,left,olfactory,2,1,1,0,0,0,0
+17,16,3234817,LN,right,APL,57,0,0,0,0,0,0
+18,17,3299214,MBON,right,MBON-j1,57,0,0,0,1,0,1
+19,18,3347708,KC,right,KC,30,0,0,0,0,0,0
+20,19,3347834,KC,right,KC,42,0,0,0,0,0,0
+21,20,3410499,sensory,left,olfactory,1,1,1,0,0,0,0
+22,21,3410506,sensory,left,olfactory,2,1,1,0,0,0,0
+23,22,3450442,PN,left,mPN; mPN iACT B2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,22,0,0,0,0,0,0
+24,23,3450751,PN,left,mPN; Multiglomerular PN 5; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+25,24,3464773,sensory,left,olfactory,1,1,1,0,0,0,0
+26,25,3465659,sensory,left,olfactory,1,1,1,0,0,0,0
+27,26,3486381,PN,left,42a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+28,27,3497901,KC,right,KC,42,0,0,0,0,0,0
+29,28,3511996,sensory,left,olfactory,1,1,1,0,0,0,0
+30,29,3522293,KC,right,KC,49,0,0,0,0,0,0
+31,30,3538129,PN,right,mPN; mPN D; mPN; olfactory 2nd_order PN,22,0,0,0,0,0,0
+32,31,3547397,sensory,left,olfactory,2,1,1,0,0,0,0
+33,32,3587612,KC,right,KC,33,0,0,0,0,0,0
+34,33,3592997,sensory,left,olfactory,2,1,1,0,0,0,0
+35,34,3664102,KC,right,KC,40,0,0,0,0,0,0
+36,35,3694515,sensory,left,olfactory,2,1,1,0,0,0,0
+37,36,3708875,sensory,left,olfactory,2,1,1,0,0,0,0
+38,37,3712893,PN,left,mPN; mPN iACT bilateral LOWER; Multiglomerular PN 2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+39,38,3716797,sensory,left,olfactory,1,1,1,0,0,0,0
+40,39,3768025,sensory,left,olfactory,2,1,1,0,0,0,0
+41,40,3771794,sensory,left,olfactory,2,1,1,0,0,0,0
+42,41,3774568,sensory,left,olfactory,1,1,1,0,0,0,0
+43,42,3790004,sensory,right,olfactory,1,1,0,1,0,0,0
+44,43,3805641,LN,right,no official annotation,1,0,0,0,0,0,0
+45,44,3806573,LN,right,no official annotation,10,0,0,0,0,0,0
+46,45,3813723,sensory,right,olfactory,2,1,0,1,0,0,0
+47,46,3819157,KC,left,KC,33,0,0,0,0,0,0
+48,47,3819171,KC,left,KC,49,0,0,0,0,0,0
+49,48,3827211,sensory,right,olfactory,1,1,0,1,0,0,0
+50,49,3840345,sensory,right,olfactory,1,1,0,1,0,0,0
+51,50,3865952,sensory,right,olfactory,2,1,0,1,0,0,0
+52,51,3872653,sensory,right,olfactory,2,1,0,1,0,0,0
+53,52,3885215,sensory,right,olfactory,1,1,0,1,0,0,0
+54,53,3893195,sensory,right,olfactory,2,1,0,1,0,0,0
+55,54,3896629,sensory,right,olfactory,2,1,0,1,0,0,0
+56,55,3913613,LN,right,no official annotation,32,0,0,0,0,0,0
+57,56,3954014,sensory,right,olfactory,2,1,0,1,0,0,0
+58,57,3958234,sensory,right,olfactory,1,1,0,1,0,0,0
+59,58,3963891,sensory,right,olfactory,1,1,0,1,0,0,0
+60,59,3980315,sensory,right,olfactory,1,1,0,1,0,0,0
+61,60,4022539,MBON,right,MBON-m1; CN-62,82,0,0,0,1,0,1
+62,61,4073353,sensory,right,olfactory,1,1,0,1,0,0,0
+63,62,4076389,sensory,right,olfactory,2,1,0,1,0,0,0
+64,63,4101295,LN,right,no official annotation,28,0,0,0,0,0,0
+65,64,4102413,LN,right,no official annotation,38,0,0,0,0,0,0
+66,65,4117305,KC,left,KC,36,0,0,0,0,0,0
+67,66,4119387,PN,right,mPN; Multiglomerular PN 7; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,32,0,0,0,0,0,0
+68,67,4134539,KC,left,KC,39,0,0,0,0,0,0
+69,68,4195012,MBON,right,MBON-h1; MBON-h2,59,0,0,0,1,0,1
+70,69,4227304,KC,right,KC,30,0,0,0,0,0,0
+71,70,4227544,KC,right,KC,39,0,0,0,0,0,0
+72,71,4229950,KC,right,KC,40,0,0,0,0,0,0
+73,72,4230061,KC,right,KC,30,0,0,0,0,0,0
+74,73,4230739,KC,right,KC,30,0,0,0,0,0,0
+75,74,4230749,MBON,right,MBON-h1; MBON-h2,59,0,0,0,1,0,1
+76,75,4234009,MBON,right,MBON-b3,59,0,0,0,1,0,1
+77,76,4241192,KC,right,KC,30,0,0,0,0,0,0
+78,77,4241237,MBON,right,MBON-d1,59,0,0,0,1,0,1
+79,78,4247099,LN,right,no official annotation,10,0,0,0,0,0,0
+80,79,4324898,PN,right,mPN; mPN seahorse; mPN; olfactory 2nd_order PN,22,0,0,0,0,0,0
+81,80,4327684,PN,right,mPN; FFN-21; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,22,0,0,0,0,0,0
+82,81,4354933,PN,left,85c PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+83,82,4391978,PN,right,mPN; Multiglomerular PN 3; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+84,83,4401350,MBON,left,MBON-g1,59,0,0,0,1,1,0
+85,84,4411505,KC,left,KC,30,0,0,0,0,0,0
+86,85,4412036,KC,left,KC,30,0,0,0,0,0,0
+87,86,4412315,KC,left,KC,30,0,0,0,0,0,0
+88,87,4414426,KC,right,KC,33,0,0,0,0,0,0
+89,88,4415241,KC,right,KC,40,0,0,0,0,0,0
+90,89,4444354,KC,right,KC,30,0,0,0,0,0,0
+91,90,4493199,PN,left,13a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+92,91,4518546,KC,left,KC,30,0,0,0,0,0,0
+93,92,4570270,LN,left,no official annotation,28,0,0,0,0,0,0
+94,93,4598109,MBON,right,MBON-f1,64,0,0,0,1,0,1
+95,94,4598363,MBON,right,MBON-g1,59,0,0,0,1,0,1
+96,95,4620453,LN,right,no official annotation,17,0,0,0,0,0,0
+97,96,4636432,LN,left,no official annotation,28,0,0,0,0,0,0
+98,97,4651929,PN,right,94a&94b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+99,98,4665186,LN,left,LHN-13; CN-49,32,0,0,0,0,0,0
+100,99,4679139,PN,right,mPN; mPN iACT A2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+101,100,4700078,PN,right,mPN; mPN iACT B2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,22,0,0,0,0,0,0
+102,101,4785242,LN,left,no official annotation,56,0,0,0,0,0,0
+103,102,4926999,LN,left,no official annotation,28,0,0,0,0,0,0
+104,103,4982172,KC,right,KC,49,0,0,0,0,0,0
+105,104,4985759,LN,left,Thermo PN 2,17,0,0,0,0,0,0
+106,105,5019924,KC,right,KC,30,0,0,0,0,0,0
+107,106,5030808,LN,left,no official annotation,10,0,0,0,0,0,0
+108,107,5051342,KC,right,KC,30,0,0,0,0,0,0
+109,108,5090549,sensory,left,olfactory,2,1,1,0,0,0,0
+110,109,5247102,LN,right,no official annotation,10,0,0,0,0,0,0
+111,110,5261424,PN,left,mPN; mPN iACT A2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+112,111,5291791,LN,left,no official annotation,10,0,0,0,0,0,0
+113,112,5322337,LN,left,no official annotation,3,0,0,0,0,0,0
+114,113,5395823,MBON,left,MBON-g2,59,0,0,0,1,1,0
+115,114,5474852,LN,left,CN-5,41,0,0,0,0,0,0
+116,115,5835799,KC,right,KC,30,0,0,0,0,0,0
+117,116,5835815,KC,right,KC,33,0,0,0,0,0,0
+118,117,5836035,KC,right,KC,30,0,0,0,0,0,0
+119,118,5836163,KC,right,KC,30,0,0,0,0,0,0
+120,119,5836181,KC,right,KC,33,0,0,0,0,0,0
+121,120,5836197,KC,right,KC,30,0,0,0,0,0,0
+122,121,5836206,KC,right,KC,30,0,0,0,0,0,0
+123,122,5836387,KC,right,KC,33,0,0,0,0,0,0
+124,123,5937084,KC,left,KC,30,0,0,0,0,0,0
+125,124,6219781,LN,right,no official annotation,3,0,0,0,0,0,0
+126,125,6340439,sensory,left,olfactory,2,1,1,0,0,0,0
+127,126,6451332,PN,left,mPN; mPN D; mPN; olfactory 2nd_order PN,22,0,0,0,0,0,0
+128,127,6557581,LN,right,no official annotation,10,0,0,0,0,0,0
+129,128,6699205,MBON,right,MBON-d2,64,0,0,0,1,0,1
+130,129,6702830,KC,left,KC,42,0,0,0,0,0,0
+131,130,6703240,MBON,right,MBON-n1,64,0,0,0,1,0,1
+132,131,6704232,KC,left,KC,33,0,0,0,0,0,0
+133,132,6791927,sensory,left,olfactory,1,1,1,0,0,0,0
+134,133,7055857,MBON,left,MBON-d1,59,0,0,0,1,1,0
+135,134,7065182,LN,right,CN-20,75,0,0,0,0,0,0
+136,135,7092417,PN,left,47a&33b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+137,136,7107433,PN,left,45b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+138,137,7187384,KC,left,KC,40,0,0,0,0,0,0
+139,138,7196392,KC,right,KC,42,0,0,0,0,0,0
+140,139,7198338,PN,left,24a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+141,140,7394271,LN,left,no official annotation,10,0,0,0,0,0,0
+142,141,7503199,PN,right,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+143,142,7515491,PN,left,49a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+144,143,7527710,sensory,left,olfactory,1,1,1,0,0,0,0
+145,144,7542938,sensory,left,olfactory,1,1,1,0,0,0,0
+146,145,7563413,LN,right,no official annotation,3,0,0,0,0,0,0
+147,146,7582412,LN,left,no official annotation,28,0,0,0,0,0,0
+148,147,7600311,LN,right,no official annotation,10,0,0,0,0,0,0
+149,148,7658146,sensory,right,olfactory,2,1,0,1,0,0,0
+150,149,7690945,KC,right,KC,33,0,0,0,0,0,0
+151,150,7719547,sensory,right,olfactory,2,1,0,1,0,0,0
+152,151,7786053,KC,right,KC,30,0,0,0,0,0,0
+153,152,7802210,MBON,left,MBON-i1,59,0,0,0,1,1,0
+154,153,7828725,KC,right,KC,33,0,0,0,0,0,0
+155,154,7829784,KC,right,KC,33,0,0,0,0,0,0
+156,155,7838405,KC,right,KC,42,0,0,0,0,0,0
+157,156,7840203,KC,right,KC,33,0,0,0,0,0,0
+158,157,7840791,MBON,right,MBON-e1,64,0,0,0,1,0,1
+159,158,7843730,PN,left,74a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+160,159,7845346,PN,left,63a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+161,160,7851153,PN,left,82a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+162,161,7852250,PN,left,45a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+163,162,7864823,PN,left,59a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+164,163,7865652,PN,left,22c PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+165,164,7865696,PN,left,1a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+166,165,7865767,PN,left,83a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+167,166,7868195,KC,right,KC,30,0,0,0,0,0,0
+168,167,7873135,PN,left,42b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+169,168,7891312,KC,right,KC,33,0,0,0,0,0,0
+170,169,7897469,MBON,right,MBON-q1,64,0,0,0,1,0,1
+171,170,7910624,MBON,left,MBON-q1,64,0,0,0,1,1,0
+172,171,7916593,PN,left,30a PN; uPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,12,0,0,0,0,0,0
+173,172,7934904,PN,left,35a PN; uPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,12,0,0,0,0,0,0
+174,173,7935088,PN,right,35a PN; uPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,12,0,0,0,0,0,0
+175,174,7939890,LN,left,no official annotation,10,0,0,0,0,0,0
+176,175,7939979,LN,left,no official annotation,10,0,0,0,0,0,0
+177,176,7941642,LN,left,no official annotation,10,0,0,0,0,0,0
+178,177,7941652,LN,left,_broad D1,10,0,0,0,0,0,0
+179,178,8021456,PN,left,33a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+180,179,8037197,LN,left,CN-2,32,0,0,0,0,0,0
+181,180,8066542,KC,right,KC,30,0,0,0,0,0,0
+182,181,8068173,KC,right,KC,40,0,0,0,0,0,0
+183,182,8094859,MBON,right,MBON-b1,59,0,0,0,1,0,1
+184,183,8102935,LN,left,no official annotation,10,0,0,0,0,0,0
+185,184,8118474,KC,left,KC,40,0,0,0,0,0,0
+186,185,8140109,PN,right,74a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+187,186,8177991,KC,left,KC,33,0,0,0,0,0,0
+188,187,8198238,LN,right,no official annotation,10,0,0,0,0,0,0
+189,188,8198317,LN,right,no official annotation,10,0,0,0,0,0,0
+190,189,8198416,LN,right,_broad D1,10,0,0,0,0,0,0
+191,190,8198513,LN,right,no official annotation,10,0,0,0,0,0,0
+192,191,8199671,LN,right,no official annotation,10,0,0,0,0,0,0
+193,192,8231264,LN,right,no official annotation,10,0,0,0,0,0,0
+194,193,8243455,PN,right,83a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+195,194,8244723,PN,right,42a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+196,195,8244823,PN,right,13a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+197,196,8245014,PN,right,59a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+198,197,8245146,PN,right,82a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+199,198,8245513,PN,right,63a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+200,199,8245692,PN,right,42b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+201,200,8245869,PN,right,24a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+202,201,8246081,PN,right,67b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+203,202,8246750,PN,right,47a&33b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+204,203,8247451,PN,right,45a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+205,204,8248631,PN,right,22c PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+206,205,8248706,KC,left,KC,42,0,0,0,0,0,0
+207,206,8252067,PN,right,1a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+208,207,8253413,PN,right,45b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+209,208,8256186,PN,right,30a PN; uPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,12,0,0,0,0,0,0
+210,209,8262302,KC,left,KC,30,0,0,0,0,0,0
+211,210,8262372,KC,left,KC,40,0,0,0,0,0,0
+212,211,8262503,KC,left,KC,30,0,0,0,0,0,0
+213,212,8263140,KC,left,KC,33,0,0,0,0,0,0
+214,213,8263285,KC,left,KC,33,0,0,0,0,0,0
+215,214,8273369,LN,left,no official annotation,10,0,0,0,0,0,0
+216,215,8274021,LN,left,no official annotation,10,0,0,0,0,0,0
+217,216,8274902,KC,right,KC,33,0,0,0,0,0,0
+218,217,8276782,PN,left,mPN; Multiglomerular PN 7; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,32,0,0,0,0,0,0
+219,218,8297018,MBON,right,MBON-e2,64,0,0,0,1,0,1
+220,219,8311264,LN,left,no official annotation,10,0,0,0,0,0,0
+221,220,8318678,KC,left,KC,49,0,0,0,0,0,0
+222,221,8338584,MBON,left,MBON-h1; MBON-h2,59,0,0,0,1,1,0
+223,222,8393981,KC,left,KC,42,0,0,0,0,0,0
+224,223,8399890,PN,left,94a&94b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+225,224,8413663,KC,right,KC,30,0,0,0,0,0,0
+226,225,8419602,KC,right,KC,42,0,0,0,0,0,0
+227,226,8427677,KC,right,KC,49,0,0,0,0,0,0
+228,227,8480221,PN,left,mPN; mPN seahorse; mPN; olfactory 2nd_order PN,22,0,0,0,0,0,0
+229,228,8504660,KC,right,KC,49,0,0,0,0,0,0
+230,229,8509534,PN,left,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,29,0,0,0,0,0,0
+231,230,8509987,KC,right,KC,49,0,0,0,0,0,0
+232,231,8513389,KC,left,KC,33,0,0,0,0,0,0
+233,232,8559607,KC,right,KC,33,0,0,0,0,0,0
+234,233,8704079,PN,left,mPN; mPN iACT B3; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+235,234,8798010,MBON,left,MBON-h1; MBON-h2,59,0,0,0,1,1,0
+236,235,8812078,LN,right,no official annotation,22,0,0,0,0,0,0
+237,236,8835968,KC,right,KC,42,0,0,0,0,0,0
+238,237,8850802,KC,right,KC,30,0,0,0,0,0,0
+239,238,8864096,KC,left,KC,42,0,0,0,0,0,0
+240,239,8865199,KC,left,KC,33,0,0,0,0,0,0
+241,240,8877158,MBON,left,MBON-a1,59,0,0,0,1,1,0
+242,241,8877795,LN,left,no official annotation,1,0,0,0,0,0,0
+243,242,8877971,LN,left,no official annotation,10,0,0,0,0,0,0
+244,243,8891315,KC,right,KC,33,0,0,0,0,0,0
+245,244,8922644,MBON,left,MBON-e2,64,0,0,0,1,1,0
+246,245,8924186,KC,right,KC,42,0,0,0,0,0,0
+247,246,8980589,MBON,right,MBON-c1; CN-59,59,0,0,0,1,0,1
+248,247,8997281,KC,right,KC,42,0,0,0,0,0,0
+249,248,9074101,MBON,right,MBON-d3,64,0,0,0,1,0,1
+250,249,9109799,MBON,left,MBON-d3,64,0,0,0,1,1,0
+251,250,9119558,PN,left,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+252,251,9275210,LN,right,Thermo PN 1; Thermo PN 6,28,0,0,0,0,0,0
+253,252,9291474,LN,right,Thermo PN 2,17,0,0,0,0,0,0
+254,253,9445876,LN,left,no official annotation,38,0,0,0,0,0,0
+255,254,9447255,LN,left,LHN-6,32,0,0,0,0,0,0
+256,255,9469519,MBON,right,MBON-b2,59,0,0,0,1,0,1
+257,256,9525492,KC,right,KC,33,0,0,0,0,0,0
+258,257,9531722,KC,right,KC,33,0,0,0,0,0,0
+259,258,9556700,KC,right,KC,30,0,0,0,0,0,0
+260,259,9589146,PN,left,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; gustatory-pharyngeal 2nd_order PN,22,0,0,0,0,0,0
+261,260,9609048,KC,right,KC,30,0,0,0,0,0,0
+262,261,9707941,KC,right,KC,49,0,0,0,0,0,0
+263,262,9730873,KC,right,KC,42,0,0,0,0,0,0
+264,263,9766793,KC,right,KC,30,0,0,0,0,0,0
+265,264,9792178,LN,left,PL-4,38,0,0,0,0,0,0
+266,265,9796812,KC,right,KC,30,0,0,0,0,0,0
+267,266,9800178,LN,right,no official annotation,38,0,0,0,0,0,0
+268,267,9808146,LN,right,no official annotation,28,0,0,0,0,0,0
+269,268,9809626,KC,right,KC,33,0,0,0,0,0,0
+270,269,9813188,KC,right,KC,33,0,0,0,0,0,0
+271,270,9847388,KC,right,KC,42,0,0,0,0,0,0
+272,271,9889095,KC,right,KC,33,0,0,0,0,0,0
+273,272,9897223,KC,right,KC,34,0,0,0,0,0,0
+274,273,9971209,LN,left,no official annotation,22,0,0,0,0,0,0
+275,274,9983191,KC,left,KC,33,0,0,0,0,0,0
+276,275,10056280,KC,right,KC,30,0,0,0,0,0,0
+277,276,10160250,PN,right,mPN; Multiglomerular PN 5; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+278,277,10163418,MBON,right,MBON-a1,59,0,0,0,1,0,1
+279,278,10167078,PN,right,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,32,0,0,0,0,0,0
+280,279,10169396,KC,right,KC,49,0,0,0,0,0,0
+281,280,10259967,KC,right,KC,42,0,0,0,0,0,0
+282,281,10555409,LN,left,no official annotation,10,0,0,0,0,0,0
+283,282,10831005,LN,right,no official annotation,10,0,0,0,0,0,0
+284,283,10990803,PN,right,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+285,284,11003707,LN,left,no official annotation,53,0,0,0,0,0,0
+286,285,11017761,MBON,left,MBON-p1; CN-61,82,0,0,0,1,1,0
+287,286,11051276,LN,right,no official annotation,10,0,0,0,0,0,0
+288,287,11135340,LN,left,no official annotation,41,0,0,0,0,0,0
+289,288,11144258,LN,left,no official annotation,38,0,0,0,0,0,0
+290,289,11178891,LN,right,LHN-10; CN-46,32,0,0,0,0,0,0
+291,290,11279244,PN,right,49a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+292,291,11524047,MBON,right,MBON-g2,59,0,0,0,1,0,1
+293,292,11543212,PN,right,mPN; mPN iACT bilateral LOWER; Multiglomerular PN 2; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+294,293,11645541,LN,right,no official annotation,41,0,0,0,0,0,0
+295,294,11691603,KC,left,KC,30,0,0,0,0,0,0
+296,295,11691640,KC,left,KC,49,0,0,0,0,0,0
+297,296,11725127,KC,left,KC,30,0,0,0,0,0,0
+298,297,11725803,KC,left,KC,30,0,0,0,0,0,0
+299,298,11782821,LN,left,no official annotation,32,0,0,0,0,0,0
+300,299,11785627,KC,left,KC,42,0,0,0,0,0,0
+301,300,11813287,KC,right,KC,30,0,0,0,0,0,0
+302,301,12217572,KC,left,KC,42,0,0,0,0,0,0
+303,302,12225666,PN,left,mPN; FFN-21; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN; thermo-warm 2nd_order PN,22,0,0,0,0,0,0
+304,303,12726582,KC,left,KC,40,0,0,0,0,0,0
+305,304,12882387,LN,left,no official annotation,3,0,0,0,0,0,0
+306,305,12948470,LN,left,Thermo PN 1; Thermo PN 6,28,0,0,0,0,0,0
+307,306,13589251,PN,right,33a PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+308,307,14082322,MBON,left,MBON-e1,64,0,0,0,1,1,0
+309,308,14255342,KC,left,KC,49,0,0,0,0,0,0
+310,309,14319960,KC,left,KC,49,0,0,0,0,0,0
+311,310,14460113,KC,left,KC,33,0,0,0,0,0,0
+312,311,14519048,KC,left,KC,33,0,0,0,0,0,0
+313,312,14522124,KC,left,KC,33,0,0,0,0,0,0
+314,313,14604028,PN,right,85c PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+315,314,14757992,LN,right,no official annotation,58,0,0,0,0,0,0
+316,315,14758420,LN,right,no official annotation,58,0,0,0,0,0,0
+317,316,14898295,KC,left,KC,33,0,0,0,0,0,0
+318,317,14898816,KC,left,KC,30,0,0,0,0,0,0
+319,318,15253921,MBON,left,MBON-f1,64,0,0,0,1,1,0
+320,319,15398730,MBON,left,MBON-n1,64,0,0,0,1,1,0
+321,320,15421363,MBON,left,MBON-j1,57,0,0,0,1,1,0
+322,321,15571194,LN,left,APL,57,0,0,0,0,0,0
+323,322,15617305,MBON,right,MBON-a2,59,0,0,0,1,0,1
+324,323,15691114,KC,left,KC,49,0,0,0,0,0,0
+325,324,15721919,KC,left,KC,30,0,0,0,0,0,0
+326,325,15722306,KC,left,KC,49,0,0,0,0,0,0
+327,326,15722867,KC,left,KC,30,0,0,0,0,0,0
+328,327,15734988,KC,left,KC,42,0,0,0,0,0,0
+329,328,15810983,MBON,left,MBON-d2,64,0,0,0,1,1,0
+330,329,15861524,KC,left,KC,42,0,0,0,0,0,0
+331,330,16015738,KC,left,KC,42,0,0,0,0,0,0
+332,331,16017113,KC,left,KC,49,0,0,0,0,0,0
+333,332,16039470,KC,left,KC,30,0,0,0,0,0,0
+334,333,16058860,KC,left,KC,30,0,0,0,0,0,0
+335,334,16178283,MBON,right,MBON-p1; CN-61,82,0,0,0,1,0,1
+336,335,16210988,KC,left,KC,33,0,0,0,0,0,0
+337,336,16223537,MBON,left,MBON-c1; CN-59,59,0,0,0,1,1,0
+338,337,16259595,PN,left,67b PN; uPN; olfactory 2nd_order PN,12,0,0,0,0,0,0
+339,338,16295025,LN,right,LHN-6,32,0,0,0,0,0,0
+340,339,16435965,KC,left,KC,30,0,0,0,0,0,0
+341,340,16438190,KC,left,KC,33,0,0,0,0,0,0
+342,341,16440649,KC,left,KC,33,0,0,0,0,0,0
+343,342,16440704,KC,left,KC,49,0,0,0,0,0,0
+344,343,16444327,KC,left,KC,30,0,0,0,0,0,0
+345,344,16485079,LN,right,Multiglomerular PN 4; LHN-11; CN-47,32,0,0,0,0,0,0
+346,345,16486385,LN,left,LHN-10; CN-46,32,0,0,0,0,0,0
+347,346,16515871,PN,right,mPN; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,29,0,0,0,0,0,0
+348,347,16625432,KC,right,KC,49,0,0,0,0,0,0
+349,348,16627773,KC,left,KC,33,0,0,0,0,0,0
+350,349,16627838,KC,left,KC,30,0,0,0,0,0,0
+351,350,16627861,KC,left,KC,30,0,0,0,0,0,0
+352,351,16627950,KC,left,KC,49,0,0,0,0,0,0
+353,352,16629757,KC,left,KC,33,0,0,0,0,0,0
+354,353,16629788,KC,left,KC,30,0,0,0,0,0,0
+355,354,16629931,KC,left,KC,33,0,0,0,0,0,0
+356,355,16630024,KC,left,KC,42,0,0,0,0,0,0
+357,356,16630264,KC,left,KC,30,0,0,0,0,0,0
+358,357,16630385,KC,left,KC,30,0,0,0,0,0,0
+359,358,16630941,KC,left,KC,30,0,0,0,0,0,0
+360,359,16631114,KC,left,KC,30,0,0,0,0,0,0
+361,360,16631222,KC,left,KC,42,0,0,0,0,0,0
+362,361,16631248,KC,left,KC,49,0,0,0,0,0,0
+363,362,16720240,KC,right,KC,36,0,0,0,0,0,0
+364,363,16735586,PN,right,mPN; mPN iACT B3; mPN; olfactory 2nd_order PN; gustatory-external 2nd_order PN,22,0,0,0,0,0,0
+365,364,16782830,MBON,left,MBON-b2,59,0,0,0,1,1,0
+366,365,16795524,PN,right,mPN; mPN iACT bilateral UPPER; Multiglomerular PN 1; mPN; olfactory 2nd_order PN; thermo-warm 2nd_order PN,10,0,0,0,0,0,0
+367,366,16795838,PN,left,mPN; mPN iACT bilateral UPPER; Multiglomerular PN 1; mPN; olfactory 2nd_order PN; thermo-warm 2nd_order PN,10,0,0,0,0,0,0
+368,367,16797672,MBON,right,MBON-i1,59,0,0,0,1,0,1
+369,368,16846805,MBON,left,MBON-k1,59,0,0,0,1,1,0
+370,369,16850888,KC,right,KC,30,0,0,0,0,0,0
+371,370,16868923,MBON,left,MBON-o1; CN-60,64,0,0,0,1,1,0
+372,371,16883909,MBON,left,MBON-b3,59,0,0,0,1,1,0
+373,372,16939375,KC,left,KC,42,0,0,0,0,0,0
+374,373,16977881,KC,left,KC,30,0,0,0,0,0,0
+375,374,17013073,MBON,right,MBON-o1; CN-60,64,0,0,0,1,0,1
+376,375,17016974,MBON,left,MBON-m1; CN-62,82,0,0,0,1,1,0
+377,376,17147410,KC,left,KC,34,0,0,0,0,0,0
+378,377,17147698,MBON,left,MBON-b1,59,0,0,0,1,1,0
+379,378,17355757,MBON,left,MBON-a2,59,0,0,0,1,1,0
+380,379,17434825,LN,left,Multiglomerular PN 4; LHN-11; CN-47,32,0,0,0,0,0,0
+381,380,17525174,LN,right,no official annotation,53,0,0,0,0,0,0
+382,381,17591442,LN,right,CN-5,41,0,0,0,0,0,0
+383,382,17671219,LN,right,LHN-13; CN-49,32,0,0,0,0,0,0
+384,383,17776906,LN,left,no official annotation,28,0,0,0,0,0,0
+385,384,17822238,LN,right,CN-2,32,0,0,0,0,0,0
+386,385,17844900,LN,left,no official annotation,22,0,0,0,0,0,0
+387,386,18028397,MBON,right,MBON-k1,59,0,0,0,1,0,1
+388,387,18598859,LN,right,no official annotation,22,0,0,0,0,0,0
+389,388,21664445,LN,right,no official annotation,28,0,0,0,0,0,0

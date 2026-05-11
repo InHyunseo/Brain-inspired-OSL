@@ -1,18 +1,21 @@
-"""Plotting + GIF rendering utilities shared across agents."""
+"""Plotting + GIF rendering utilities."""
+from __future__ import annotations
+
 import csv
 import io
 import json
 import os
 
-import numpy as np
+import imageio
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import imageio
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# Training-curve plotting (RSAC / DRQN episode-loop)
+# Training-curve plotting (RSAC episode-loop)
 # ---------------------------------------------------------------------------
 
 
@@ -57,8 +60,10 @@ def save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal, ema_alpha=0.0
     payload = {
         "ema_alpha": float(ema_alpha),
         "returns": {"x": x_ret, "raw": ret_raw, "ema": ret_ema, "ylabel": "Return", "ylim": ret_ylim},
-        "steps_to_goal": {"x": x_step, "raw": step_raw, "ema": step_ema,
-                          "ylabel": "Step to Source", "ylim": step_ylim},
+        "steps_to_goal": {
+            "x": x_step, "raw": step_raw, "ema": step_ema,
+            "ylabel": "Steps to Source", "ylim": step_ylim,
+        },
     }
     with open(os.path.join(data_dir, "training_metrics.json"), "w") as f:
         json.dump(payload, f, indent=2)
@@ -115,43 +120,44 @@ def plot_training_pngs_from_data(run_dir):
 
 
 # ---------------------------------------------------------------------------
-# Rollout GIF rendering — ported from ipynb/PPO_framework.ipynb render_elite_gif
+# Rollout GIF rendering — bilateral sensor + head/body separation aware
 # ---------------------------------------------------------------------------
 
 
-def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
-    """Render one matplotlib frame matching the notebook's elite-GIF style.
+def _plume_field(env, resolution=120):
+    cfg = env.cfg
+    xs = np.linspace(0.0, cfg.arena_width_mm, resolution)
+    ys = np.linspace(0.0, cfg.arena_height_mm, resolution)
+    field = np.zeros((resolution, resolution), dtype=np.float32)
+    for j, y in enumerate(ys):
+        for i, x in enumerate(xs):
+            field[j, i] = env.field._base(float(x), float(y))
+    return field, cfg.arena_width_mm, cfg.arena_height_mm
 
-    Works for both StaticEnv (uses analytic _conc grid) and DynamicEnv
-    (uses cached _field_view). Returns an RGB numpy array.
-    """
-    L = float(env.L)
+
+def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
+    """One matplotlib frame: plume + trajectory + high-cast events + source."""
+    field, W, H = _plume_field(env)
+    cfg = env.cfg
 
     fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor("black")
     ax.set_facecolor("black")
-
-    field = getattr(env, "_field_view", None)
-    if field is None:
-        res = 100
-        xs = np.linspace(-L, L, res)
-        ys = np.linspace(-L, L, res)
-        X, Y = np.meshgrid(xs, ys)
-        field = np.clip(np.asarray(env._conc(X, Y), dtype=np.float32), 0.0, 1.0)
-    ax.imshow(field, extent=[-L, L, -L, L], origin="lower", cmap="inferno", vmin=0, vmax=1)
-
-    ax.plot(traj_x, traj_y, color="#50dcff", linewidth=2.0, alpha=0.8)
+    ax.imshow(field, extent=[0.0, W, 0.0, H], origin="lower", cmap="inferno",
+              vmin=0.0, vmax=float(cfg.c_peak))
+    ax.plot(traj_x, traj_y, color="#50dcff", linewidth=2.0, alpha=0.85)
     if cast_x:
-        ax.scatter(cast_x, cast_y, color="white", marker="*", s=150,
+        ax.scatter(cast_x, cast_y, color="white", marker="*", s=140,
                    edgecolors="black", zorder=10)
-    ax.scatter(env.src_x, env.src_y, color="lime", marker="P", s=150, zorder=11)
-    circle = plt.Circle((env.src_x, env.src_y), env.r_goal, color="gray", fill=False)
-    ax.add_patch(circle)
-
-    if title is None:
-        title = f"Step: {step}"
-    ax.set_title(title, color="white")
+    ax.scatter([cfg.source_x_mm], [cfg.source_y_mm], color="lime", marker="P",
+               s=160, zorder=11)
+    ax.add_patch(plt.Circle((cfg.source_x_mm, cfg.source_y_mm),
+                            cfg.success_radius_mm, color="gray", fill=False))
+    ax.set_xlim(0.0, W)
+    ax.set_ylim(0.0, H)
+    ax.set_aspect("equal")
     ax.tick_params(colors="white")
+    ax.set_title(title or f"Step: {step}", color="white")
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=80, bbox_inches="tight", facecolor="black")

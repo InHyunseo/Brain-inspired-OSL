@@ -1,17 +1,19 @@
 """Unified eval entry. Branches on the agent_type recorded in run_dir/config.json.
 
-PPO  : load model + VecNormalize, run elite-seed search, render notebook-style GIF.
-RSAC/DRQN : load checkpoint, run deterministic rollouts, render GIF of the
-            best-return episode using the shared plotter.
+PPO  : load Policy from ckpt_final.pt, run deterministic rollouts, render GIF.
+RSAC : load checkpoint, run deterministic rollouts, render GIF of best episode.
 """
+from __future__ import annotations
+
 import json
 import os
 
 import numpy as np
 import torch
 
+from src.envs.osl_env import EnvConfig, OslEnv
 from src.utils.config import build_parser
-from src.utils.factory import make_agent, make_env
+from src.utils.factory import make_env, make_rsac_agent
 from src.utils.plotter import render_rollout_frame, save_gif
 from src.utils.seed import set_global_seed
 
@@ -31,10 +33,12 @@ def _load_conf(run_dir):
 
 
 def _apply_conf_overrides(args, conf):
-    """Restore train-time settings from config.json, but keep CLI-provided eval
-    overrides (--episodes, --noise-coef, --save-gif, --ckpt)."""
-    keep = {"out_dir", "run_dir", "ckpt", "episodes", "eval_episodes",
-            "save_gif", "force_cpu", "noise_coef", "seed_base", "agent_type"}
+    """Restore train-time settings from config.json, but keep eval-time overrides."""
+    keep = {
+        "out_dir", "run_dir", "ckpt", "episodes", "eval_episodes",
+        "save_gif", "force_cpu", "seed_base", "agent_type",
+        "eval_noise_stage", "eval_noise_strength",
+    }
     for k, v in conf.items():
         if k in keep:
             continue
@@ -44,100 +48,129 @@ def _apply_conf_overrides(args, conf):
     return args
 
 
+def _build_eval_env(args):
+    return make_env(
+        args,
+        seed=args.seed_base,
+        noise_stage=args.eval_noise_stage,
+        noise_strength=args.eval_noise_strength,
+    )
+
+
 # ---------------------------------------------------------------------------
 # PPO eval
 # ---------------------------------------------------------------------------
 
 
 def eval_ppo(args, run_dir):
-    from src.agents.ppo_agent import PPOAgent
-    model_path = args.ckpt or os.path.join(run_dir, "checkpoints", "final.zip")
-    vnorm_path = os.path.join(run_dir, "checkpoints", "final_vnorm.pkl")
-    env_kind = f"dynamic:{args.noise_coef}"
+    from src.agents.ppo_agent import PPOConfig
+    from src.models.policy import Policy
 
-    agent = PPOAgent(features_dim=args.features_dim, seed=args.seed)
-    agent.load(model_path, vecnorm_path=vnorm_path, env_kind=env_kind, n_envs=1)
+    ckpt_path = args.ckpt or os.path.join(run_dir, "ckpt_final.pt")
+    if not os.path.exists(ckpt_path):
+        ckpt_path = os.path.join(run_dir, "checkpoints", "ckpt_final.pt")
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"No PPO checkpoint at {ckpt_path}.")
+    print(f"[eval] loading {ckpt_path}")
 
-    elites = _find_elite_seeds(agent, args)
-    if not elites:
-        print("[eval] no elite seeds found.")
-        return
+    payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    cfg = PPOConfig(**payload["agent_config"])
+    device = _device(args)
+    policy = Policy(
+        weights_csv=cfg.weights_csv,
+        metadata_csv=cfg.metadata_csv,
+        latent_dim=cfg.latent_dim,
+        message_passing_steps=cfg.message_passing_steps,
+        log_std_init=cfg.log_std_init,
+    ).to(device)
+    policy.load_state_dict(payload["policy_state_dict"])
+    policy.eval()
 
-    if args.save_gif:
-        best_seed = elites[0]
-        gif_path = os.path.join(run_dir, "plots", "best_agent.gif")
-        _render_ppo_gif(agent, best_seed, env_kind, gif_path)
+    env = _build_eval_env(args)
+    rets, succ = [], []
+    best_seed, best_ret = None, -float("inf")
 
-
-def _find_elite_seeds(agent, args, n_to_find=3, min_casts=1, max_casts=300):
-    elites = []
-    vec = agent.vec_env
-    print(f"[eval] searching elite seeds (success + casts in [{min_casts}, {max_casts}])")
-    for trial in range(min(args.eval_episodes * 5, 500)):
-        seed = args.seed_base + trial
-        vec.seed(seed)
-        obs = vec.reset()
-
-        lstm_states, ep_starts = None, np.ones((1,), dtype=bool)
-        for _ in range(300):
-            action, lstm_states = agent.predict(
-                obs, state=lstm_states, episode_start=ep_starts, deterministic=True
-            )
-            obs, _, done, infos = vec.step(action)
-            ep_starts = done
-            if done[0]:
-                info = infos[0]
-                casts = info.get("casts", 0)
-                if info.get("is_success") and min_casts <= casts <= max_casts:
-                    elites.append(seed)
-                    print(f"[eval] seed {seed}: success (casts={casts})")
+    for i in range(args.eval_episodes):
+        seed = args.seed_base + i
+        obs, _ = env.reset(seed=seed)
+        actor_state, critic_state = policy.initial_states(1, device)
+        mask = torch.zeros(1, 1, device=device)
+        ep_ret, success = 0.0, False
+        while True:
+            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+            with torch.no_grad():
+                action, _, _, next_actor_state, next_critic_state = policy.act(
+                    obs_t, actor_state, critic_state, mask, deterministic=True
+                )
+            obs, r, terminated, truncated, info = env.step(action.squeeze(0).cpu().numpy())
+            ep_ret += float(r)
+            done = bool(terminated or truncated)
+            if done:
+                success = bool(info.get("success", False))
+            mask.fill_(0.0 if done else 1.0)
+            actor_state = next_actor_state * mask
+            critic_state = next_critic_state * mask
+            if done:
                 break
-        if len(elites) >= n_to_find:
-            break
-    return elites
+
+        rets.append(ep_ret)
+        succ.append(float(success))
+        if ep_ret > best_ret:
+            best_ret, best_seed = ep_ret, seed
+
+    print(f"[eval] success_rate={np.mean(succ):.3f}  avg_return={np.mean(rets):.2f}  episodes={len(rets)}")
+
+    if args.save_gif and best_seed is not None:
+        gif_path = os.path.join(run_dir, "plots", "best_agent.gif")
+        _render_ppo_gif(policy, device, args, best_seed, gif_path)
 
 
-def _render_ppo_gif(agent, seed, env_kind, gif_path):
-    vec = agent.vec_env
-    vec.seed(seed)
-    obs = vec.reset()
-    raw_env = vec.envs[0].unwrapped
+def _render_ppo_gif(policy, device, args, seed, gif_path):
+    env = _build_eval_env(args)
+    obs, _ = env.reset(seed=seed)
+    actor_state, critic_state = policy.initial_states(1, device)
+    mask = torch.zeros(1, 1, device=device)
 
-    lstm_states, ep_starts = None, np.ones((1,), dtype=bool)
-    frames, traj_x, traj_y, cx, cy = [], [], [], [], []
+    frames, traj_x, traj_y, cast_x, cast_y = [], [], [], [], []
     print(f"[eval] rendering GIF for seed {seed}")
-    for t in range(300):
-        action, lstm_states = agent.predict(
-            obs, state=lstm_states, episode_start=ep_starts, deterministic=True
-        )
-        curr_x, curr_y = raw_env.x, raw_env.y
-        if int(np.rint(action[0, 2])) == 1 or raw_env.in_cast:
-            cx.append(curr_x); cy.append(curr_y)
-        traj_x.append(curr_x); traj_y.append(curr_y)
+    for t in range(env.max_steps):
+        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        with torch.no_grad():
+            action, _, _, next_actor_state, next_critic_state = policy.act(
+                obs_t, actor_state, critic_state, mask, deterministic=True
+            )
+        traj_x.append(env.x_mm)
+        traj_y.append(env.y_mm)
+
+        obs, _, terminated, truncated, info = env.step(action.squeeze(0).cpu().numpy())
+        if info.get("event_is_high_cast_like"):
+            cast_x.append(env.x_mm)
+            cast_y.append(env.y_mm)
 
         frames.append(render_rollout_frame(
-            raw_env, traj_x, traj_y, cx, cy, t,
+            env, traj_x, traj_y, cast_x, cast_y, t,
             title=f"PPO seed={seed} step={t}",
         ))
 
-        obs, _, done, _ = vec.step(action)
-        ep_starts = done
-        if done[0]:
+        done = bool(terminated or truncated)
+        mask.fill_(0.0 if done else 1.0)
+        actor_state = next_actor_state * mask
+        critic_state = next_critic_state * mask
+        if done:
             break
 
     save_gif(frames, gif_path, fps=15)
 
 
 # ---------------------------------------------------------------------------
-# RSAC / DRQN eval
+# RSAC eval
 # ---------------------------------------------------------------------------
 
 
-def eval_episode_loop(args, run_dir):
-    env_kind = args.rsac_env_kind if args.agent_type == "rsac" else args.drqn_env_kind
-    env = make_env(env_kind)
+def eval_rsac(args, run_dir):
+    env = _build_eval_env(args)
     device = _device(args)
-    agent = make_agent(args, env, device)
+    agent = make_rsac_agent(args, env, device)
 
     ckpt = args.ckpt or os.path.join(run_dir, "checkpoints", "best.pt")
     if not os.path.exists(ckpt):
@@ -154,15 +187,10 @@ def eval_episode_loop(args, run_dir):
         h = None
         ep_ret, success = 0.0, False
         while True:
-            if args.agent_type == "rsac":
-                action, h = agent.get_action_deterministic(obs, h)
-                env_action = action
-            else:
-                a_idx, h = agent.get_action_deterministic(obs, h)
-                env_action = agent.to_env_action(a_idx)
-            obs, r, terminated, truncated, info = env.step(env_action)
+            action, h = agent.get_action_deterministic(obs, h)
+            obs, r, terminated, truncated, info = env.step(action)
             ep_ret += float(r)
-            if info.get("is_success"):
+            if info.get("success"):
                 success = True
             if terminated or truncated:
                 break
@@ -172,36 +200,28 @@ def eval_episode_loop(args, run_dir):
         if ep_ret > best_ret:
             best_ret, best_seed = ep_ret, seed
 
-    print(f"[eval] success_rate={np.mean(succ):.3f}  avg_return={np.mean(rets):.2f}")
+    print(f"[eval] success_rate={np.mean(succ):.3f}  avg_return={np.mean(rets):.2f}  episodes={len(rets)}")
 
     if args.save_gif and best_seed is not None:
-        _render_episode_loop_gif(agent, env, best_seed, args, run_dir)
+        _render_rsac_gif(agent, env, args, best_seed, run_dir)
 
 
-def _render_episode_loop_gif(agent, env, seed, args, run_dir):
+def _render_rsac_gif(agent, env, args, seed, run_dir):
     obs, _ = env.reset(seed=seed)
     h = None
-    frames, traj_x, traj_y, cx, cy = [], [], [], [], []
-    for t in range(300):
-        if args.agent_type == "rsac":
-            action, h = agent.get_action_deterministic(obs, h)
-            env_action = action
-            cast_taken = int(np.rint(action[2])) == 1
-        else:
-            a_idx, h = agent.get_action_deterministic(obs, h)
-            env_action = agent.to_env_action(a_idx)
-            cast_taken = (a_idx == 1)
-
-        traj_x.append(env.x); traj_y.append(env.y)
-        if cast_taken or getattr(env, "in_cast", False):
-            cx.append(env.x); cy.append(env.y)
-
+    frames, traj_x, traj_y, cast_x, cast_y = [], [], [], [], []
+    for t in range(env.max_steps):
+        action, h = agent.get_action_deterministic(obs, h)
+        traj_x.append(env.x_mm)
+        traj_y.append(env.y_mm)
+        obs, _, terminated, truncated, info = env.step(action)
+        if info.get("event_is_high_cast_like"):
+            cast_x.append(env.x_mm)
+            cast_y.append(env.y_mm)
         frames.append(render_rollout_frame(
-            env, traj_x, traj_y, cx, cy, t,
-            title=f"{args.agent_type.upper()} seed={seed} step={t}",
+            env, traj_x, traj_y, cast_x, cast_y, t,
+            title=f"RSAC seed={seed} step={t}",
         ))
-
-        obs, _, terminated, truncated, _ = env.step(env_action)
         if terminated or truncated:
             break
 
@@ -226,8 +246,10 @@ def main(argv=None):
 
     if args.agent_type == "ppo":
         eval_ppo(args, args.run_dir)
+    elif args.agent_type == "rsac":
+        eval_rsac(args, args.run_dir)
     else:
-        eval_episode_loop(args, args.run_dir)
+        raise ValueError(f"Unsupported agent_type: {args.agent_type}")
 
 
 if __name__ == "__main__":

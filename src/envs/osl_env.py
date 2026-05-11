@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any
+
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+from src.envs.events import classify_event
+from src.envs.geometry import sensor_positions, wrap_angle
+from src.envs.odor_field import GaussianOdorField
+
+
+@dataclass
+class EnvConfig:
+    body_length_mm: float = 3.5
+    sensor_spacing_mm: float = 0.15
+    dt: float = 0.1
+    episode_seconds: float = 120.0
+    arena_width_mm: float = 80.0
+    arena_height_mm: float = 120.0
+    source_x_mm: float = 40.0
+    source_y_mm: float = 100.0
+    initial_x_mm: float = 40.0
+    initial_y_mm: float = 20.0
+    initial_heading_rad: float = math.pi / 2.0
+    randomize_heading: bool = True
+    success_radius_mm: float = 7.5
+    terminate_on_wall: bool = True
+    wall_penalty: float = -2.0
+    gaussian_sigma_mm: float = 30.0
+    c_peak: float = 1.0
+    c_background: float = 0.0
+    epsilon: float = 1e-8
+    noise_stage: int = 0
+    noise_strength: float = 0.0
+    noise_rho: float = 0.94
+    noise_grid_spacing_mm: float = 0.05
+    v_max_mm_s: float = 1.2
+    body_omega_max_deg_s: float = 120.0
+    head_omega_max_deg_s: float = 240.0
+    initial_head_relative_angle_rad: float = 0.0
+    stop_threshold_mm_s: float = 0.08
+    run_threshold_mm_s: float = 0.2
+    reward_goal: float = 10.0
+    reward_log_k: float = 0.1
+    reward_time_penalty: float = -0.005
+    reward_spin_penalty: float = -0.02
+    max_sampling_duration_s: float = 2.0
+    seed: int = 7
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EnvConfig":
+        valid = {field_name for field_name in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in payload.items() if k in valid})
+
+
+# Observation: [c_left, c_right, prev_v_norm, prev_body_omega_norm, prev_head_omega_norm]
+OBS_DIM = 5
+# Action: [v, body_omega, head_omega] in [-1, 1]
+ACTION_DIM = 3
+
+
+class OslEnv(gym.Env[np.ndarray, np.ndarray]):
+    metadata = {"render_modes": ["ansi"]}
+
+    def __init__(self, config: EnvConfig | dict[str, Any] | None = None):
+        super().__init__()
+        if config is None:
+            self.cfg = EnvConfig()
+        elif isinstance(config, EnvConfig):
+            self.cfg = config
+        else:
+            self.cfg = EnvConfig.from_dict(config)
+        self.rng = np.random.default_rng(self.cfg.seed)
+        self.field = GaussianOdorField(
+            source_x_mm=self.cfg.source_x_mm,
+            source_y_mm=self.cfg.source_y_mm,
+            sigma_mm=self.cfg.gaussian_sigma_mm,
+            c_peak=self.cfg.c_peak,
+            c_background=self.cfg.c_background,
+            epsilon=self.cfg.epsilon,
+            noise_stage=self.cfg.noise_stage,
+            noise_strength=self.cfg.noise_strength,
+            noise_rho=self.cfg.noise_rho,
+            arena_width_mm=self.cfg.arena_width_mm,
+            arena_height_mm=self.cfg.arena_height_mm,
+            noise_grid_spacing_mm=self.cfg.noise_grid_spacing_mm,
+            rng=self.rng,
+        )
+        self.max_steps = int(round(self.cfg.episode_seconds / self.cfg.dt))
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(ACTION_DIM,), dtype=np.float32)
+        self.reset(seed=self.cfg.seed)
+
+    def set_noise_stage(self, stage: int, strength: float) -> None:
+        """Update plume noise schedule (used by curriculum). Rebuilds noise grid in place."""
+        self.cfg.noise_stage = int(stage)
+        self.cfg.noise_strength = float(strength)
+        self.field.noise_stage = int(stage)
+        self.field.noise_strength = float(strength)
+        self.field.rebuild_noise_grid(initial=True)
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+            self.field.rng = self.rng
+        self.step_count = 0
+        self.x_mm = self.cfg.initial_x_mm
+        self.y_mm = self.cfg.initial_y_mm
+        self.heading_rad = self.cfg.initial_heading_rad
+        if self.cfg.randomize_heading:
+            self.heading_rad = float(self.rng.uniform(-math.pi, math.pi))
+        self.head_relative_angle_rad = self.cfg.initial_head_relative_angle_rad
+        self.prev_action = np.zeros(ACTION_DIM, dtype=np.float32)
+        self.prev_logs: list[dict[str, float]] = []
+        self.accum_sampling_angle_rad = 0.0
+        self.sampling_duration_s = 0.0
+        self.field.rebuild_noise_grid(initial=True)
+        obs, info = self._observe()
+        return obs, info
+
+    def _sensor_readings(self) -> dict[str, float]:
+        sensor_heading = wrap_angle(self.heading_rad + self.head_relative_angle_rad)
+        coords = sensor_positions(self.x_mm, self.y_mm, sensor_heading, self.cfg.sensor_spacing_mm)
+        left = self.field.sample(*coords["left"])
+        right = self.field.sample(*coords["right"])
+        return {
+            "left": left,
+            "right": right,
+            "avg": 0.5 * (left + right),
+            "sensor_heading_rad": sensor_heading,
+        }
+
+    def _observe(self):
+        readings = self._sensor_readings()
+        self.prev_logs.append({"left": readings["left"], "right": readings["right"], "avg": readings["avg"]})
+        if len(self.prev_logs) > 4:
+            self.prev_logs.pop(0)
+
+        obs = np.asarray(
+            [
+                readings["left"],
+                readings["right"],
+                self.prev_action[0],
+                self.prev_action[1],
+                self.prev_action[2],
+            ],
+            dtype=np.float32,
+        )
+
+        distance = math.dist((self.x_mm, self.y_mm), (self.cfg.source_x_mm, self.cfg.source_y_mm))
+        bearing = wrap_angle(math.atan2(self.cfg.source_y_mm - self.y_mm, self.cfg.source_x_mm - self.x_mm) - self.heading_rad)
+        gradient_x, gradient_y = self.field.gradient(self.x_mm, self.y_mm)
+        info = {
+            "distance_to_source_mm": distance,
+            "bearing_to_source_rad": bearing,
+            "source_x_mm": self.cfg.source_x_mm,
+            "source_y_mm": self.cfg.source_y_mm,
+            "gradient_x": gradient_x,
+            "gradient_y": gradient_y,
+            "sensor_left": readings["left"],
+            "sensor_right": readings["right"],
+            "sensor_avg": readings["avg"],
+            "sensor_heading_rad": readings["sensor_heading_rad"],
+            "head_relative_angle_rad": self.head_relative_angle_rad,
+        }
+        return obs, info
+
+    def step(self, action: np.ndarray):
+        raw_v = float(np.clip(action[0], -1.0, 1.0))
+        raw_body_omega = float(np.clip(action[1], -1.0, 1.0))
+        raw_head_omega = float(np.clip(action[2], -1.0, 1.0))
+        v_mm_s = (raw_v + 1.0) * 0.5 * self.cfg.v_max_mm_s
+        body_omega_rad_s = math.radians(self.cfg.body_omega_max_deg_s) * raw_body_omega
+        head_omega_rad_s = math.radians(self.cfg.head_omega_max_deg_s) * raw_head_omega
+
+        self.x_mm += v_mm_s * math.cos(self.heading_rad) * self.cfg.dt
+        self.y_mm += v_mm_s * math.sin(self.heading_rad) * self.cfg.dt
+        self.heading_rad = wrap_angle(self.heading_rad + body_omega_rad_s * self.cfg.dt)
+        self.head_relative_angle_rad = wrap_angle(self.head_relative_angle_rad + head_omega_rad_s * self.cfg.dt)
+        self.prev_action = np.asarray(
+            [v_mm_s / self.cfg.v_max_mm_s, raw_body_omega, raw_head_omega], dtype=np.float32
+        )
+        self.step_count += 1
+        if self.cfg.noise_stage >= 2 and self.cfg.noise_strength > 0.0:
+            self.field.advance()
+
+        if v_mm_s < self.cfg.stop_threshold_mm_s:
+            self.accum_sampling_angle_rad += head_omega_rad_s * self.cfg.dt
+            self.sampling_duration_s += self.cfg.dt
+        else:
+            self.accum_sampling_angle_rad = 0.0
+            self.sampling_duration_s = 0.0
+
+        obs, info = self._observe()
+        wall = not (0.0 <= self.x_mm <= self.cfg.arena_width_mm and 0.0 <= self.y_mm <= self.cfg.arena_height_mm)
+        success = info["distance_to_source_mm"] <= self.cfg.success_radius_mm
+        terminated = success or (wall and self.cfg.terminate_on_wall)
+        truncated = (not terminated) and self.step_count >= self.max_steps
+
+        reward_goal = self.cfg.reward_goal if success else 0.0
+        if len(self.prev_logs) >= 2:
+            prev_avg = self.prev_logs[-2]["avg"]
+            cur_avg = info["sensor_avg"]
+            reward_dlog = float(
+                (math.log(cur_avg + self.cfg.epsilon) - math.log(prev_avg + self.cfg.epsilon)) / self.cfg.dt
+            )
+        else:
+            reward_dlog = 0.0
+        reward_log = self.cfg.reward_log_k * reward_dlog
+        reward_time = self.cfg.reward_time_penalty
+        reward_wall = self.cfg.wall_penalty if wall else 0.0
+        flags = classify_event(
+            speed_mm_s=v_mm_s,
+            omega_rad_s=body_omega_rad_s,
+            sampling_angle_rad=self.accum_sampling_angle_rad,
+            sampling_duration_s=self.sampling_duration_s,
+            run_threshold_mm_s=self.cfg.run_threshold_mm_s,
+            stop_threshold_mm_s=self.cfg.stop_threshold_mm_s,
+            max_sampling_duration_s=self.cfg.max_sampling_duration_s,
+        )
+        reward_spin = self.cfg.reward_spin_penalty if flags.is_spin_like else 0.0
+        reward = reward_goal + reward_log + reward_time + reward_wall + reward_spin
+
+        info.update(
+            {
+                "reward_goal": reward_goal,
+                "reward_log": reward_log,
+                "reward_time": reward_time,
+                "reward_wall": reward_wall,
+                "reward_spin": reward_spin,
+                "reward_total": reward,
+                "success": success,
+                "is_success": success,
+                "wall_contact": wall,
+                "termination_reason": "success"
+                if success
+                else "wall"
+                if wall
+                else "time_limit"
+                if truncated
+                else "running",
+                "x_mm": self.x_mm,
+                "y_mm": self.y_mm,
+                "heading_rad": self.heading_rad,
+                "head_relative_angle_rad": self.head_relative_angle_rad,
+                "v_mm_s": v_mm_s,
+                "body_omega_rad_s": body_omega_rad_s,
+                "head_omega_rad_s": head_omega_rad_s,
+                "event_is_run": flags.is_run,
+                "event_is_stop": flags.is_stop,
+                "event_is_low_sweep": flags.is_low_sweep,
+                "event_is_high_cast_like": flags.is_high_cast_like,
+                "event_is_turn_like": flags.is_turn_like,
+                "event_is_spin_like": flags.is_spin_like,
+                "step": self.step_count,
+                "time_s": self.step_count * self.cfg.dt,
+            }
+        )
+        return obs, float(reward), terminated, truncated, info
+
+    def render(self):
+        sensor_heading = wrap_angle(self.heading_rad + self.head_relative_angle_rad)
+        return (
+            f"OslEnv(x={self.x_mm:.2f}, y={self.y_mm:.2f}, "
+            f"heading={self.heading_rad:.2f}, sensor_heading={sensor_heading:.2f})"
+        )

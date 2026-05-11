@@ -1,123 +1,428 @@
-"""sb3 RecurrentPPO wrapper for the 2D OSL connectome policy.
+"""PPO trainer.
 
-Mirrors the curriculum loop in ipynb/PPO_framework.ipynb: each phase calls
-`learn_phase(env_kind, total_timesteps)` which (re)builds a 16-way
-SubprocVecEnv + VecNormalize wrapped around StaticEnv/DynamicEnv, while the
-underlying RecurrentPPO model + LSTM hidden state are preserved across phases.
+Custom on-policy PPO with separate actor/critic optimizers, sequence-based
+updates, and recurrent actor state managed across env steps. Curriculum
+phases are driven externally by calling `set_noise_stage` on the runner
+between `train(phase_timesteps=...)` calls; the same trainer/policy/optimizer/
+buffer instances are reused across phases.
 """
-import os
+from __future__ import annotations
+
+import json
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
 
 import numpy as np
-from sb3_contrib import RecurrentPPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize
+import torch
+from torch import nn
 
-from src.models.networks import ConnectomeExtractor
-from src.utils.factory import make_env_fn
+from src.envs.osl_env import OslEnv
+from src.envs.parallel_runner import ParallelRunner, VectorRunner
+from src.models.policy import Policy
 
 
-class PPOAgent:
+@dataclass
+class PPOConfig:
+    rollout_steps: int = 128
+    num_envs: int = 16
+    parallel_envs: bool = True
+    update_epochs: int = 4
+    minibatch_envs: int = 4
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip_epsilon: float = 0.2
+    entropy_coef: float = 0.005
+    value_loss_coef: float = 0.5
+    normalize_advantages: bool = True
+    clip_value_loss: bool = True
+    actor_lr: float = 3e-4
+    critic_lr: float = 1e-3
+    actor_max_grad_norm: float = 0.5
+    critic_max_grad_norm: float = 0.5
+    log_std_init: float = -0.5
+    latent_dim: int = 32
+    message_passing_steps: int = 6
+    weights_csv: str = "assets/connectome/weights.csv"
+    metadata_csv: str = "assets/connectome/metadata.csv"
+    eval_interval_updates: int = 10
+    eval_episodes: int = 3
+    log_every_updates: int = 1
+    checkpoint_every_timesteps: int = 100_000
+    recent_stats_window: int = 50
+    seed: int = 7
+    device: str = "auto"
+
+    @classmethod
+    def from_args(cls, args) -> "PPOConfig":
+        kw = {}
+        for f in cls.__dataclass_fields__:
+            if hasattr(args, f) and getattr(args, f) is not None:
+                kw[f] = getattr(args, f)
+        return cls(**kw)
+
+
+class RolloutBuffer:
     def __init__(
         self,
-        features_dim=180,
-        lr=3e-4,
-        batch_size=256,
-        n_steps=128,
-        ent_coef=0.01,
-        tb_log_dir=None,
-        seed=42,
+        rollout_steps: int,
+        num_envs: int,
+        obs_dim: int,
+        action_dim: int,
+        actor_state_dim: int,
+        device: torch.device,
     ):
-        self.features_dim = int(features_dim)
-        self.lr = float(lr)
-        self.batch_size = int(batch_size)
-        self.n_steps = int(n_steps)
-        self.ent_coef = float(ent_coef)
-        self.tb_log_dir = tb_log_dir
-        self.seed = int(seed)
+        self.rollout_steps = rollout_steps
+        self.num_envs = num_envs
+        self.obs = torch.zeros(rollout_steps, num_envs, obs_dim, device=device)
+        self.masks = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.actions = torch.zeros(rollout_steps, num_envs, action_dim, device=device)
+        self.log_probs = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.rewards = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.values = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.returns = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.advantages = torch.zeros(rollout_steps, num_envs, 1, device=device)
+        self.initial_actor_states = torch.zeros(num_envs, actor_state_dim, device=device)
 
-        self.policy_kwargs = dict(
-            features_extractor_class=ConnectomeExtractor,
-            features_extractor_kwargs=dict(features_dim=self.features_dim),
-            net_arch=dict(pi=[128], qf=[128]),
+    def begin_rollout(self, actor_states: torch.Tensor) -> None:
+        self.initial_actor_states = actor_states.clone()
+
+    def insert(self, step, obs, mask, action, log_prob, reward, value):
+        self.obs[step].copy_(obs)
+        self.masks[step].copy_(mask)
+        self.actions[step].copy_(action)
+        self.log_probs[step].copy_(log_prob)
+        self.rewards[step].copy_(reward)
+        self.values[step].copy_(value)
+
+    def compute_returns(self, next_value, next_mask, gamma, gae_lambda):
+        gae = torch.zeros_like(next_value)
+        for step in reversed(range(self.rollout_steps)):
+            nv = next_value if step == self.rollout_steps - 1 else self.values[step + 1]
+            nm = next_mask if step == self.rollout_steps - 1 else self.masks[step + 1]
+            delta = self.rewards[step] + gamma * nv * nm - self.values[step]
+            gae = delta + gamma * gae_lambda * nm * gae
+            self.advantages[step] = gae
+        self.returns.copy_(self.advantages + self.values)
+
+    def iter_minibatches(self, minibatch_envs):
+        indices = torch.randperm(self.num_envs, device=self.obs.device)
+        for start in range(0, self.num_envs, minibatch_envs):
+            env_ids = indices[start : start + minibatch_envs]
+            yield {
+                "obs": self.obs[:, env_ids],
+                "masks": self.masks[:, env_ids],
+                "actions": self.actions[:, env_ids],
+                "log_probs": self.log_probs[:, env_ids],
+                "values": self.values[:, env_ids],
+                "returns": self.returns[:, env_ids],
+                "advantages": self.advantages[:, env_ids],
+                "actor_state0": self.initial_actor_states[env_ids],
+            }
+
+
+def _resolve_device(name: str) -> torch.device:
+    if name == "cpu":
+        return torch.device("cpu")
+    if name == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+    if name == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cpu")
+
+
+class PPOTrainer:
+    def __init__(self, env_config: dict[str, Any], cfg: PPOConfig, run_dir: str | Path):
+        self.env_config = dict(env_config)
+        self.cfg = cfg
+        self.device = _resolve_device(cfg.device)
+        use_parallel = bool(cfg.parallel_envs and cfg.num_envs > 1)
+        runner_cls = ParallelRunner if use_parallel else VectorRunner
+        self.runner = runner_cls(self.env_config, cfg.num_envs, cfg.seed)
+        self.use_parallel_envs = use_parallel
+
+        obs_dim = int(np.prod(self.runner.observation_shape))
+        action_dim = int(np.prod(self.runner.action_shape))
+
+        self.policy = Policy(
+            weights_csv=cfg.weights_csv,
+            metadata_csv=cfg.metadata_csv,
+            latent_dim=cfg.latent_dim,
+            message_passing_steps=cfg.message_passing_steps,
+            log_std_init=cfg.log_std_init,
+        ).to(self.device)
+
+        self.actor_params = list(self.policy.actor_parameters())
+        self.critic_params = list(self.policy.critic_parameters())
+        self.actor_optimizer = torch.optim.Adam(self.actor_params, lr=cfg.actor_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic_params, lr=cfg.critic_lr)
+        self.buffer = RolloutBuffer(
+            rollout_steps=cfg.rollout_steps,
+            num_envs=cfg.num_envs,
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            actor_state_dim=self.policy.actor_state_size,
+            device=self.device,
         )
 
-        self.model = None
-        self.vec_env = None
-        self._last_vecnorm_path = None
+        self.run_dir = Path(run_dir)
+        self.checkpoint_dir = self.run_dir / "checkpoints"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.log_path = self.run_dir / "training_log.jsonl"
+        self._write_config()
 
-    def _build_vec_env(self, env_kind, n_envs, vecnorm_load_path=None):
-        env_fns = [make_env_fn(env_kind, monitor=True) for _ in range(n_envs)]
-        vec = SubprocVecEnv(env_fns)
-        if vecnorm_load_path is not None and os.path.exists(vecnorm_load_path):
-            vec = VecNormalize.load(vecnorm_load_path, vec)
-            vec.training = True
-        else:
-            vec = VecNormalize(vec, norm_obs=False, norm_reward=True, clip_reward=10.0)
-        return vec
+        # persistent rollout state across phases
+        self._obs: torch.Tensor | None = None
+        self._actor_state: torch.Tensor | None = None
+        self._critic_state: torch.Tensor | None = None
+        self._mask: torch.Tensor | None = None
+        self._episode_returns = np.zeros(cfg.num_envs, dtype=np.float64)
+        self._episode_lengths = np.zeros(cfg.num_envs, dtype=np.int64)
+        self._completed_returns: list[float] = []
+        self._completed_lengths: list[int] = []
+        self._recent_returns: deque[float] = deque(maxlen=max(1, cfg.recent_stats_window))
+        self._recent_lengths: deque[int] = deque(maxlen=max(1, cfg.recent_stats_window))
+        self._recent_successes: deque[float] = deque(maxlen=max(1, cfg.recent_stats_window))
+        self._total_steps = 0
+        self._update_count = 0
+        self._next_checkpoint_step = max(1, cfg.checkpoint_every_timesteps)
 
-    def learn_phase(
-        self,
-        env_kind,
-        total_timesteps,
-        n_envs=16,
-        callback=None,
-        vecnorm_load_path=None,
-        reset_num_timesteps=None,
-    ):
-        """Run one curriculum phase. The first call constructs the model;
-        subsequent calls swap the env and keep training."""
-        vec = self._build_vec_env(env_kind, n_envs, vecnorm_load_path)
+    def _write_config(self) -> None:
+        payload = {"env_config": self.env_config, "agent_config": asdict(self.cfg)}
+        with (self.run_dir / "config.json").open("w", encoding="utf-8") as h:
+            json.dump(payload, h, indent=2)
 
-        if self.model is None:
-            self.model = RecurrentPPO(
-                "MlpLstmPolicy", vec,
-                learning_rate=self.lr,
-                batch_size=self.batch_size,
-                n_steps=self.n_steps,
-                ent_coef=self.ent_coef,
-                policy_kwargs=self.policy_kwargs,
-                verbose=1,
-                tensorboard_log=self.tb_log_dir,
-                seed=self.seed,
-            )
-            if reset_num_timesteps is None:
-                reset_num_timesteps = True
-        else:
-            self.model.set_env(vec)
-            if reset_num_timesteps is None:
-                reset_num_timesteps = False
+    def _checkpoint_payload(self, summary: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "policy_state_dict": self.policy.state_dict(),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+            "env_config": self.env_config,
+            "agent_config": asdict(self.cfg),
+            "training_state": {
+                "total_steps": int(self._total_steps),
+                "updates": int(self._update_count),
+            },
+            "summary": summary or {},
+        }
 
-        self.vec_env = vec
-        self.model.learn(
-            total_timesteps=int(total_timesteps),
-            callback=callback,
-            reset_num_timesteps=reset_num_timesteps,
+    def save_checkpoint(self, filename: str, summary: dict[str, Any] | None = None) -> Path:
+        path = self.checkpoint_dir / filename
+        torch.save(self._checkpoint_payload(summary), path)
+        return path
+
+    def _append_log(self, payload: dict[str, Any]) -> None:
+        with self.log_path.open("a", encoding="utf-8") as h:
+            h.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+    def _print_progress(self, payload: dict[str, Any]) -> None:
+        print(
+            f"[Train] step {payload['total_steps']} "
+            f"| update {payload['updates']} "
+            f"| eps {payload['completed_episodes']} "
+            f"| ret {payload['recent_return_mean']:.3f} "
+            f"| len {payload['recent_episode_length_mean']:.1f} "
+            f"| success {payload['recent_success_rate'] * 100.0:.1f}% "
+            f"| actor {payload['actor_loss']:.4f} "
+            f"| critic {payload['critic_loss']:.4f} "
+            f"| ent {payload['entropy']:.4f}"
         )
 
-    def save(self, model_path, vecnorm_path=None):
-        if self.model is None:
-            raise RuntimeError("PPOAgent.save called before any learn_phase.")
-        self.model.save(model_path)
-        if vecnorm_path is not None and self.vec_env is not None:
-            self.vec_env.save(vecnorm_path)
-            self._last_vecnorm_path = vecnorm_path
+    def _ensure_rollout_state(self) -> None:
+        if self._obs is not None:
+            return
+        obs_np, _ = self.runner.reset()
+        self._obs = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device)
+        self._actor_state, self._critic_state = self.policy.initial_states(self.cfg.num_envs, self.device)
+        self._mask = torch.zeros(self.cfg.num_envs, 1, device=self.device)
 
-    def load(self, model_path, vecnorm_path=None, env_kind="dynamic_1.0", n_envs=1):
-        """Load a model + VecNormalize stats for evaluation (single env)."""
-        eval_vec = DummyVecEnv([make_env_fn(env_kind, monitor=True) for _ in range(n_envs)])
-        if vecnorm_path is not None and os.path.exists(vecnorm_path):
-            eval_vec = VecNormalize.load(vecnorm_path, eval_vec)
-            eval_vec.training = False
-            eval_vec.norm_reward = False
-        self.vec_env = eval_vec
-        self.model = RecurrentPPO.load(model_path, env=eval_vec)
+    def _evaluate(self, episodes: int) -> dict[str, float]:
+        env = OslEnv({**self.env_config, "seed": self.cfg.seed + 10_000})
+        returns = []
+        successes = []
+        for episode_idx in range(episodes):
+            obs, _ = env.reset(seed=self.cfg.seed + 10_000 + episode_idx)
+            actor_state, critic_state = self.policy.initial_states(1, self.device)
+            mask = torch.zeros(1, 1, device=self.device)
+            ep_return = 0.0
+            done = False
+            success = False
+            while not done:
+                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+                with torch.no_grad():
+                    action, _, _, next_actor_state, next_critic_state = self.policy.act(
+                        obs_t, actor_state, critic_state, mask, deterministic=True
+                    )
+                obs, reward, terminated, truncated, info = env.step(action.squeeze(0).cpu().numpy())
+                ep_return += reward
+                done = bool(terminated or truncated)
+                if done:
+                    success = bool(info.get("success", False))
+                mask.fill_(0.0 if done else 1.0)
+                actor_state = next_actor_state * mask
+                critic_state = next_critic_state * mask
+            returns.append(ep_return)
+            successes.append(1.0 if success else 0.0)
+        env.close()
+        return {
+            "eval_return_mean": float(np.mean(returns)) if returns else 0.0,
+            "eval_return_std": float(np.std(returns)) if returns else 0.0,
+            "eval_success_rate": float(np.mean(successes)) if successes else 0.0,
+        }
 
-    def predict(self, obs, state=None, episode_start=None, deterministic=True):
-        if self.model is None:
-            raise RuntimeError("PPOAgent.predict called before any learn_phase or load.")
-        return self.model.predict(
-            obs, state=state, episode_start=episode_start, deterministic=deterministic
+    def _update_policy(self) -> dict[str, float]:
+        advantages = self.buffer.advantages
+        if self.cfg.normalize_advantages:
+            adv_mean = advantages.mean()
+            adv_std = advantages.std().clamp_min(1e-6)
+            self.buffer.advantages = (advantages - adv_mean) / adv_std
+        actor_losses, critic_losses, entropies = [], [], []
+        for _ in range(self.cfg.update_epochs):
+            for batch in self.buffer.iter_minibatches(self.cfg.minibatch_envs):
+                values, log_probs, entropy = self.policy.evaluate_actions_sequence(
+                    obs_seq=batch["obs"],
+                    mask_seq=batch["masks"],
+                    action_seq=batch["actions"],
+                    actor_state0=batch["actor_state0"],
+                    critic_state0=torch.zeros(batch["actor_state0"].shape[0], 0, device=self.device),
+                )
+                ratio = torch.exp(log_probs - batch["log_probs"])
+                surr1 = ratio * batch["advantages"]
+                surr2 = torch.clamp(ratio, 1.0 - self.cfg.clip_epsilon, 1.0 + self.cfg.clip_epsilon) * batch["advantages"]
+                actor_loss = -torch.min(surr1, surr2).mean() - self.cfg.entropy_coef * entropy.mean()
+
+                if self.cfg.clip_value_loss:
+                    clipped_values = batch["values"] + (values - batch["values"]).clamp(
+                        -self.cfg.clip_epsilon, self.cfg.clip_epsilon
+                    )
+                    value_loss = 0.5 * torch.max(
+                        (values - batch["returns"]).pow(2),
+                        (clipped_values - batch["returns"]).pow(2),
+                    ).mean()
+                else:
+                    value_loss = 0.5 * (values - batch["returns"]).pow(2).mean()
+                critic_loss = self.cfg.value_loss_coef * value_loss
+
+                self.actor_optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
+                actor_loss.backward(retain_graph=True)
+                nn.utils.clip_grad_norm_(self.actor_params, self.cfg.actor_max_grad_norm)
+                self.actor_optimizer.step()
+
+                critic_loss.backward()
+                nn.utils.clip_grad_norm_(self.critic_params, self.cfg.critic_max_grad_norm)
+                self.critic_optimizer.step()
+
+                actor_losses.append(float(actor_loss.detach().cpu()))
+                critic_losses.append(float(critic_loss.detach().cpu()))
+                entropies.append(float(entropy.mean().detach().cpu()))
+        return {
+            "actor_loss": float(np.mean(actor_losses)) if actor_losses else 0.0,
+            "critic_loss": float(np.mean(critic_losses)) if critic_losses else 0.0,
+            "entropy": float(np.mean(entropies)) if entropies else 0.0,
+        }
+
+    def train(self, phase_timesteps: int) -> dict[str, Any]:
+        """Run rollout/update loop until `phase_timesteps` env-steps have been collected
+        in this phase. Persistent state (rollout state, optimizer, buffer) is preserved
+        across phases — call multiple times to advance a curriculum."""
+        self._ensure_rollout_state()
+        phase_start_step = self._total_steps
+        phase_target = phase_start_step + int(phase_timesteps)
+        latest_metrics: dict[str, Any] = {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
+        log_payload: dict[str, Any] = {}
+
+        print(
+            f"[PhaseStart] target_steps={phase_target} (this phase +{phase_timesteps}) "
+            f"| device={self.device} | runner={'parallel' if self.use_parallel_envs else 'local'}"
         )
 
-    @property
-    def last_vecnorm_path(self):
-        return self._last_vecnorm_path
+        while self._total_steps < phase_target:
+            self.buffer.begin_rollout(self._actor_state)
+            for step in range(self.cfg.rollout_steps):
+                with torch.no_grad():
+                    action, log_prob, value, next_actor_state, next_critic_state = self.policy.act(
+                        self._obs, self._actor_state, self._critic_state, self._mask, deterministic=False
+                    )
+                next_obs_np, reward_np, done_np, infos = self.runner.step(action.cpu().numpy())
+                reward = torch.as_tensor(reward_np, dtype=torch.float32, device=self.device)
+                next_obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=self.device)
+                next_mask = torch.as_tensor(1.0 - done_np, dtype=torch.float32, device=self.device)
+
+                self.buffer.insert(step, self._obs, self._mask, action, log_prob, reward, value)
+
+                self._episode_returns += reward_np[:, 0]
+                self._episode_lengths += 1
+                done_flags = done_np[:, 0] > 0.5
+                for env_idx in np.flatnonzero(done_flags):
+                    ep_return = float(self._episode_returns[env_idx])
+                    ep_length = int(self._episode_lengths[env_idx])
+                    success = bool(infos[env_idx].get("success", False))
+                    self._completed_returns.append(ep_return)
+                    self._completed_lengths.append(ep_length)
+                    self._recent_returns.append(ep_return)
+                    self._recent_lengths.append(ep_length)
+                    self._recent_successes.append(1.0 if success else 0.0)
+                    self._episode_returns[env_idx] = 0.0
+                    self._episode_lengths[env_idx] = 0
+
+                self._obs = next_obs
+                self._actor_state = next_actor_state * next_mask
+                self._critic_state = next_critic_state * next_mask
+                self._mask = next_mask
+                self._total_steps += self.cfg.num_envs
+                if self._total_steps >= phase_target:
+                    break
+
+            with torch.no_grad():
+                next_value, _ = self.policy.predict_value(self._obs, self._critic_state, self._mask)
+            self.buffer.compute_returns(next_value, self._mask, self.cfg.gamma, self.cfg.gae_lambda)
+            latest_metrics = self._update_policy()
+            self._update_count += 1
+
+            if self._update_count % self.cfg.eval_interval_updates == 0:
+                latest_metrics.update(self._evaluate(self.cfg.eval_episodes))
+
+            log_payload = {
+                "total_steps": int(self._total_steps),
+                "updates": int(self._update_count),
+                "completed_episodes": len(self._completed_returns),
+                "recent_return_mean": float(np.mean(self._recent_returns)) if self._recent_returns else 0.0,
+                "recent_episode_length_mean": float(np.mean(self._recent_lengths)) if self._recent_lengths else 0.0,
+                "recent_success_rate": float(np.mean(self._recent_successes)) if self._recent_successes else 0.0,
+                **latest_metrics,
+            }
+            if self._update_count % max(1, self.cfg.log_every_updates) == 0:
+                self._print_progress(log_payload)
+                self._append_log(log_payload)
+
+            while self._total_steps >= self._next_checkpoint_step:
+                ckpt_name = f"step_{self._next_checkpoint_step:09d}.pt"
+                ckpt_path = self.save_checkpoint(ckpt_name, summary=log_payload)
+                print(f"[Checkpoint] {ckpt_path}")
+                self._next_checkpoint_step += max(1, self.cfg.checkpoint_every_timesteps)
+
+        summary = {
+            "total_steps": int(self._total_steps),
+            "updates": int(self._update_count),
+            "completed_episodes": len(self._completed_returns),
+            "mean_episode_return": float(np.mean(self._completed_returns)) if self._completed_returns else 0.0,
+            "median_episode_return": float(np.median(self._completed_returns)) if self._completed_returns else 0.0,
+            "mean_episode_length": float(np.mean(self._completed_lengths)) if self._completed_lengths else 0.0,
+            "recent_return_mean": float(np.mean(self._recent_returns)) if self._recent_returns else 0.0,
+            "recent_success_rate": float(np.mean(self._recent_successes)) if self._recent_successes else 0.0,
+            **latest_metrics,
+        }
+        return summary
+
+    def save_final(self, summary: dict[str, Any]) -> Path:
+        path = self.run_dir / "ckpt_final.pt"
+        torch.save(self._checkpoint_payload(summary), path)
+        with (self.run_dir / "summary.json").open("w", encoding="utf-8") as h:
+            json.dump(summary, h, indent=2)
+        return path
+
+    def close(self) -> None:
+        self.runner.close()

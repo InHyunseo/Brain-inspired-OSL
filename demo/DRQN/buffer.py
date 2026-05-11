@@ -1,4 +1,4 @@
-"""Episode replay buffer for RSAC sequence sampling."""
+"""Episode replay buffer for DRQN sequence sampling (int64 actions)."""
 from __future__ import annotations
 
 import random
@@ -10,8 +10,8 @@ import numpy as np
 class EpisodeReplayBuffer:
     """Stores complete episodes and samples random length-`seq_len` chunks.
 
-    Each transition is `(obs, action, reward, next_obs, terminal)` with action as
-    a float32 vector matching the env's continuous action space.
+    Each transition is `(obs, action, reward, next_obs, terminal)` with action
+    as an int64 discrete index.
     """
 
     def __init__(self, cap_steps: int = 150_000):
@@ -48,7 +48,7 @@ class EpisodeReplayBuffer:
             o0 = chunk[0][0]
             obs_seq = [o0] + [tr[3] for tr in chunk]
             obs_seqs.append(np.asarray(obs_seq, dtype=np.float32))
-            act_seqs.append(np.asarray([tr[1] for tr in chunk], dtype=np.float32))
+            act_seqs.append(np.asarray([tr[1] for tr in chunk], dtype=np.int64))
             rew_seqs.append(np.asarray([tr[2] for tr in chunk], dtype=np.float32))
             terminal_seqs.append(np.asarray([tr[4] for tr in chunk], dtype=np.float32))
 

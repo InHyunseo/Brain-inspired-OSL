@@ -1,94 +1,92 @@
-"""Env + agent factories shared by ppo / rsac / drqn."""
-from src.envs.osl_env_2d import StaticEnv, DynamicEnv
+"""Env + agent factories shared by ppo / rsac entry points."""
+from __future__ import annotations
+
+from typing import Any
+
+import torch
+
+from src.envs.osl_env import EnvConfig, OslEnv
 
 
-# env_kind strings used everywhere (CLI, phase JSON, factory):
-#   "static"        -> StaticEnv
-#   "dynamic_0.3"   -> DynamicEnv(noise_coef=0.3)
-#   "dynamic_0.6"   -> DynamicEnv(noise_coef=0.6)
-#   "dynamic_1.0"   -> DynamicEnv(noise_coef=1.0)
-#   "dynamic:<c>"   -> DynamicEnv(noise_coef=float(<c>))     (arbitrary coef)
-_FIXED_DYNAMIC = {"dynamic_0.3": 0.3, "dynamic_0.6": 0.6, "dynamic_1.0": 1.0}
+def make_env_config_dict(args, *, noise_stage: int = 0, noise_strength: float = 0.0) -> dict[str, Any]:
+    """Build the env config dict from CLI args (used by PPO trainer + parallel runners)."""
+    return {
+        "sensor_spacing_mm": args.sensor_spacing_mm,
+        "episode_seconds": args.episode_seconds,
+        "arena_width_mm": args.arena_width_mm,
+        "arena_height_mm": args.arena_height_mm,
+        "source_x_mm": args.source_x_mm,
+        "source_y_mm": args.source_y_mm,
+        "gaussian_sigma_mm": args.gaussian_sigma_mm,
+        "success_radius_mm": args.success_radius_mm,
+        "noise_stage": noise_stage,
+        "noise_strength": noise_strength,
+        "seed": args.seed,
+    }
 
 
-def parse_env_kind(env_kind):
-    """Return (env_cls, kwargs) for the given env_kind string."""
-    if env_kind == "static":
-        return StaticEnv, {}
-    if env_kind in _FIXED_DYNAMIC:
-        return DynamicEnv, {"noise_coef": _FIXED_DYNAMIC[env_kind]}
-    if env_kind.startswith("dynamic:"):
-        return DynamicEnv, {"noise_coef": float(env_kind.split(":", 1)[1])}
-    raise ValueError(f"Unknown env_kind: {env_kind}")
+def make_env(args, *, seed: int | None = None,
+             noise_stage: int = 0, noise_strength: float = 0.0) -> OslEnv:
+    """Construct a single OslEnv. Used for RSAC training and eval."""
+    cfg_dict = make_env_config_dict(args, noise_stage=noise_stage, noise_strength=noise_strength)
+    if seed is not None:
+        cfg_dict["seed"] = seed
+    return OslEnv(EnvConfig.from_dict(cfg_dict))
 
 
-def make_env(env_kind):
-    cls, kwargs = parse_env_kind(env_kind)
-    return cls(**kwargs)
+def make_ppo_trainer(args, run_dir):
+    """Construct a PPOTrainer. Curriculum is driven externally via runner.set_noise_stage."""
+    from src.agents.ppo_agent import PPOConfig, PPOTrainer
+
+    env_cfg = make_env_config_dict(args, noise_stage=0, noise_strength=0.0)
+    cfg = PPOConfig(
+        rollout_steps=args.rollout_steps,
+        num_envs=args.num_envs,
+        parallel_envs=args.parallel_envs,
+        update_epochs=args.update_epochs,
+        minibatch_envs=args.minibatch_envs,
+        gamma=args.gamma,
+        gae_lambda=args.gae_lambda,
+        clip_epsilon=args.clip_epsilon,
+        entropy_coef=args.entropy_coef,
+        value_loss_coef=args.value_loss_coef,
+        actor_lr=args.actor_lr,
+        critic_lr=args.critic_lr,
+        actor_max_grad_norm=args.actor_max_grad_norm,
+        critic_max_grad_norm=args.critic_max_grad_norm,
+        log_std_init=args.log_std_init,
+        latent_dim=args.latent_dim,
+        message_passing_steps=args.message_passing_steps,
+        weights_csv=args.weights_csv,
+        metadata_csv=args.metadata_csv,
+        eval_interval_updates=args.eval_interval_updates,
+        eval_episodes=args.eval_episodes_during_train,
+        log_every_updates=args.log_every_updates,
+        checkpoint_every_timesteps=args.checkpoint_every_timesteps,
+        seed=args.seed,
+        device="cpu" if args.force_cpu else "auto",
+    )
+    return PPOTrainer(env_cfg, cfg, run_dir=run_dir)
 
 
-def make_env_fn(env_kind, monitor=False):
-    """Return a thunk that creates a fresh env. Wraps in sb3 Monitor if requested."""
-    cls, kwargs = parse_env_kind(env_kind)
+def make_rsac_agent(args, env, device: torch.device):
+    from src.agents.rsac_agent import RSACAgent
 
-    if monitor:
-        from stable_baselines3.common.monitor import Monitor
-
-        def _fn():
-            return Monitor(cls(**kwargs))
-    else:
-        def _fn():
-            return cls(**kwargs)
-    return _fn
-
-
-def make_agent(args, env, device):
-    """Build an agent from parsed CLI args.
-
-    For PPO, `env` is unused (PPOAgent constructs its own VecEnv); pass None.
-    """
-    if args.agent_type == "ppo":
-        from src.agents.ppo_agent import PPOAgent
-        return PPOAgent(
-            features_dim=args.features_dim,
-            lr=args.ppo_lr,
-            batch_size=args.ppo_batch_size,
-            n_steps=args.ppo_n_steps,
-            ent_coef=args.ppo_ent_coef,
-            tb_log_dir=getattr(args, "tb_log", None),
-            seed=args.seed,
-        )
-
-    if args.agent_type == "rsac":
-        from src.agents.rsac_agent import RSACAgent
-        return RSACAgent(
-            obs_dim=env.observation_space.shape[0],
-            act_dim=env.action_space.shape[0],
-            action_low=env.action_space.low,
-            action_high=env.action_space.high,
-            device=device,
-            rnn_hidden=args.rnn_hidden,
-            lr_actor=args.lr_actor,
-            lr_critic=args.lr_critic,
-            lr_alpha=args.lr_alpha,
-            gamma=args.gamma,
-            tau=args.tau,
-            actor_backbone=args.rsac_actor_backbone,
-            connectome_steps=args.connectome_steps,
-            connectome_hidden=args.connectome_hidden,
-        )
-
-    if args.agent_type == "drqn":
-        from src.agents.drqn_agent import DRQNAgent
-        return DRQNAgent(
-            obs_dim=env.observation_space.shape[0],
-            action_low=env.action_space.low,
-            action_high=env.action_space.high,
-            device=device,
-            rnn_hidden=args.rnn_hidden,
-            lr=args.lr,
-            gamma=args.gamma,
-            recurrent=args.drqn_recurrent,
-        )
-
-    raise ValueError(f"Unsupported agent_type: {args.agent_type}")
+    return RSACAgent(
+        obs_dim=env.observation_space.shape[0],
+        act_dim=env.action_space.shape[0],
+        action_low=env.action_space.low,
+        action_high=env.action_space.high,
+        device=device,
+        rnn_hidden=args.rnn_hidden,
+        lr_actor=args.lr_actor,
+        lr_critic=args.lr_critic,
+        lr_alpha=args.lr_alpha,
+        gamma=args.gamma,
+        tau=args.tau,
+        actor_backbone=args.rsac_actor_backbone,
+        connectome_latent_dim=args.latent_dim,
+        connectome_message_passing_steps=args.message_passing_steps,
+        connectome_weights_csv=args.weights_csv,
+        connectome_metadata_csv=args.metadata_csv,
+    )
