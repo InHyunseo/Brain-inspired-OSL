@@ -173,6 +173,18 @@ class PPOTrainer:
         self.log_path = self.run_dir / "training_log.jsonl"
         self._write_config()
 
+        # TensorBoard mirror of training_log.jsonl. Optional dep — fall back
+        # silently if `tensorboard` isn't installed.
+        self.tb_dir = self.run_dir / "tb"
+        self._tb_writer = None
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+
+            self.tb_dir.mkdir(parents=True, exist_ok=True)
+            self._tb_writer = SummaryWriter(log_dir=str(self.tb_dir))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PPOTrainer] TensorBoard disabled ({exc}); writing JSONL only.")
+
         # persistent rollout state across phases
         self._obs: torch.Tensor | None = None
         self._actor_state: torch.Tensor | None = None
@@ -216,6 +228,18 @@ class PPOTrainer:
     def _append_log(self, payload: dict[str, Any]) -> None:
         with self.log_path.open("a", encoding="utf-8") as h:
             h.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        if self._tb_writer is not None:
+            step = int(payload.get("total_steps", self._total_steps))
+            for k, v in payload.items():
+                if not isinstance(v, (int, float)) or isinstance(v, bool):
+                    continue
+                if k == "total_steps":
+                    continue
+                try:
+                    self._tb_writer.add_scalar(k, float(v), step)
+                except Exception:
+                    pass
+            self._tb_writer.flush()
 
     def _print_progress(self, payload: dict[str, Any]) -> None:
         print(
@@ -426,3 +450,9 @@ class PPOTrainer:
 
     def close(self) -> None:
         self.runner.close()
+        if self._tb_writer is not None:
+            try:
+                self._tb_writer.close()
+            except Exception:
+                pass
+            self._tb_writer = None
