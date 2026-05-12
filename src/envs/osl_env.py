@@ -18,7 +18,7 @@ class EnvConfig:
     body_length_mm: float = 3.5
     sensor_spacing_mm: float = 0.15
     dt: float = 0.1
-    episode_seconds: float = 120.0
+    episode_seconds: float = 60.0
     arena_width_mm: float = 80.0
     arena_height_mm: float = 120.0
     source_x_mm: float = 40.0
@@ -44,10 +44,27 @@ class EnvConfig:
     initial_head_relative_angle_rad: float = 0.0
     stop_threshold_mm_s: float = 0.08
     run_threshold_mm_s: float = 0.2
-    reward_goal: float = 10.0
-    reward_log_k: float = 0.1
+    # ---- Reward terms (biologically structured energy budget) ----
+    # Food (sparse, terminal): must dominate the cumulative energy cost so the
+    # critic always sees a clearly-positive return for successful trajectories.
+    reward_goal: float = 20.0
+    # Shaping: rate of log-concentration change ("chemotaxis information").
+    # Clipped to ±reward_log_clip to keep dlog/dt from exploding near c=0.
+    reward_log_k: float = 0.05
+    reward_log_clip: float = 0.5
+    # Basal metabolism: alive-cost per step.
     reward_time_penalty: float = -0.005
-    reward_spin_penalty: float = -0.02
+    # Movement energy ∝ v² / ω², per step (normalized actions in [-1, 1]).
+    # head_omega cost is highest because head sweeping (cast-like) is the most
+    # energetically expensive emergent behaviour for the larva.
+    reward_run_cost: float = -0.01      # coefficient on (v_norm)^2
+    reward_body_turn_cost: float = -0.005   # coefficient on (body_omega_norm)^2
+    reward_head_cast_cost: float = -0.02    # coefficient on (head_omega_norm)^2
+    # Extra penalty if the agent is stopped *and* shaking its head — emergent
+    # "cast" behaviour is allowed but should still cost more than running.
+    reward_head_cast_stopped_mult: float = 2.0
+    # Spin-like behaviour penalty (head sweep > 120° or stopped > 2 s).
+    reward_spin_penalty: float = -0.05
     max_sampling_duration_s: float = 2.0
     seed: int = 7
 
@@ -202,6 +219,9 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         truncated = (not terminated) and self.step_count >= self.max_steps
 
         reward_goal = self.cfg.reward_goal if success else 0.0
+
+        # Chemotaxis information shaping: rate of log-concentration change.
+        # Clipped because dlog/dt can blow up near c≈0 (epsilon-dominated).
         if len(self.prev_logs) >= 2:
             prev_avg = self.prev_logs[-2]["avg"]
             cur_avg = info["sensor_avg"]
@@ -211,7 +231,30 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         else:
             reward_dlog = 0.0
         reward_log = self.cfg.reward_log_k * reward_dlog
+        if self.cfg.reward_log_clip > 0.0:
+            clip = float(self.cfg.reward_log_clip)
+            if reward_log > clip:
+                reward_log = clip
+            elif reward_log < -clip:
+                reward_log = -clip
+
+        # Basal metabolism — alive cost per step.
         reward_time = self.cfg.reward_time_penalty
+
+        # Movement-energy cost (∝ v² / ω²). The head sweep is the most
+        # expensive emergent action; doubled when the body is stopped, which
+        # is biologically equivalent to a "cast" (head-only swing).
+        v_norm = float(self.prev_action[0])              # already in [0, 1]
+        body_norm = float(self.prev_action[1])           # in [-1, 1]
+        head_norm = float(self.prev_action[2])           # in [-1, 1]
+        head_cost_coef = self.cfg.reward_head_cast_cost
+        if v_mm_s < self.cfg.stop_threshold_mm_s and abs(head_norm) > 0.05:
+            head_cost_coef *= self.cfg.reward_head_cast_stopped_mult
+        reward_run = self.cfg.reward_run_cost * (v_norm * v_norm)
+        reward_body_turn = self.cfg.reward_body_turn_cost * (body_norm * body_norm)
+        reward_head_cast = head_cost_coef * (head_norm * head_norm)
+        reward_motion = reward_run + reward_body_turn + reward_head_cast
+
         reward_wall = self.cfg.wall_penalty if wall else 0.0
         flags = classify_event(
             speed_mm_s=v_mm_s,
@@ -223,13 +266,24 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
             max_sampling_duration_s=self.cfg.max_sampling_duration_s,
         )
         reward_spin = self.cfg.reward_spin_penalty if flags.is_spin_like else 0.0
-        reward = reward_goal + reward_log + reward_time + reward_wall + reward_spin
+        reward = (
+            reward_goal
+            + reward_log
+            + reward_time
+            + reward_motion
+            + reward_wall
+            + reward_spin
+        )
 
         info.update(
             {
                 "reward_goal": reward_goal,
                 "reward_log": reward_log,
                 "reward_time": reward_time,
+                "reward_run": reward_run,
+                "reward_body_turn": reward_body_turn,
+                "reward_head_cast": reward_head_cast,
+                "reward_motion": reward_motion,
                 "reward_wall": reward_wall,
                 "reward_spin": reward_spin,
                 "reward_total": reward,

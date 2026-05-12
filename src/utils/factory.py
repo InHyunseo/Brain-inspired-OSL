@@ -22,6 +22,17 @@ def make_env_config_dict(args, *, noise_stage: int = 0, noise_strength: float = 
         "noise_stage": noise_stage,
         "noise_strength": noise_strength,
         "seed": args.seed,
+        # Reward shaping
+        "reward_goal": args.reward_goal,
+        "reward_log_k": args.reward_log_k,
+        "reward_log_clip": args.reward_log_clip,
+        "reward_time_penalty": args.reward_time_penalty,
+        "reward_run_cost": args.reward_run_cost,
+        "reward_body_turn_cost": args.reward_body_turn_cost,
+        "reward_head_cast_cost": args.reward_head_cast_cost,
+        "reward_head_cast_stopped_mult": args.reward_head_cast_stopped_mult,
+        "reward_spin_penalty": args.reward_spin_penalty,
+        "wall_penalty": args.wall_penalty,
     }
 
 

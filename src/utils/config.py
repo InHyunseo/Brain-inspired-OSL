@@ -45,6 +45,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gaussian-sigma-mm", type=float, default=30.0)
     p.add_argument("--success-radius-mm", type=float, default=7.5)
 
+    # Reward shaping (biologically-structured energy budget)
+    p.add_argument("--reward-goal", type=float, default=20.0,
+                   help="Sparse food reward on success (terminal). Must dominate cumulative motion cost.")
+    p.add_argument("--reward-log-k", type=float, default=0.05,
+                   help="Coefficient on dlog(c)/dt chemotaxis shaping (clipped).")
+    p.add_argument("--reward-log-clip", type=float, default=0.5,
+                   help="Symmetric clip on the dlog/dt shaping term.")
+    p.add_argument("--reward-time-penalty", type=float, default=-0.005,
+                   help="Basal metabolism per step (alive cost).")
+    p.add_argument("--reward-run-cost", type=float, default=-0.01,
+                   help="Per-step coefficient on (v / v_max)^2.")
+    p.add_argument("--reward-body-turn-cost", type=float, default=-0.005,
+                   help="Per-step coefficient on (body_omega / max)^2.")
+    p.add_argument("--reward-head-cast-cost", type=float, default=-0.02,
+                   help="Per-step coefficient on (head_omega / max)^2 — most expensive motion.")
+    p.add_argument("--reward-head-cast-stopped-mult", type=float, default=2.0,
+                   help="Head-cast cost multiplier when the body is stopped (true 'cast' behaviour).")
+    p.add_argument("--reward-spin-penalty", type=float, default=-0.05,
+                   help="Penalty applied when the agent is classified as spinning.")
+    p.add_argument("--wall-penalty", type=float, default=-2.0,
+                   help="Terminal penalty on wall contact.")
+
     # Connectome (shared)
     p.add_argument("--weights-csv", dest="weights_csv",
                    default="assets/connectome/weights.csv")
