@@ -28,14 +28,19 @@ class EnvConfig:
     initial_heading_rad: float = math.pi / 2.0
     randomize_heading: bool = True
     success_radius_mm: float = 7.5
-    # Spawn policy: sample (x, y) uniformly inside the region where the *base*
-    # Gaussian field exceeds `spawn_c_thresh_frac * c_peak`, and at least
-    # `spawn_min_radius_mm` away from the source. Heading is initialised toward
-    # the source with Gaussian error of std `spawn_heading_std_rad`.
+    # Spawn policy: sample (x, y) uniformly inside an annulus around the source.
+    # The annulus is the intersection of three constraints:
+    #   1) base Gaussian field exceeds `spawn_c_thresh_frac * c_peak` (cue zone),
+    #   2) distance to source ≥ `spawn_min_radius_mm` (no spawning inside or
+    #      near the success region — must be well outside it),
+    #   3) distance to source ≤ `spawn_max_radius_mm` (and inside the cue zone).
+    # Heading is initialised toward the source with Gaussian error of std
+    # `spawn_heading_std_rad`.
     randomize_spawn: bool = True
     spawn_c_thresh_frac: float = 0.05
-    spawn_min_radius_mm: float = 15.0
-    spawn_max_tries: int = 200
+    spawn_min_radius_mm: float = 55.0
+    spawn_max_radius_mm: float = 70.0
+    spawn_max_tries: int = 400
     spawn_heading_std_rad: float = math.radians(30.0)
     terminate_on_wall: bool = True
     wall_penalty: float = -2.0
@@ -140,13 +145,15 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         """
         c_thr = self.cfg.spawn_c_thresh_frac * self.cfg.c_peak
         r_min = self.cfg.spawn_min_radius_mm
+        r_max = self.cfg.spawn_max_radius_mm
         W = self.cfg.arena_width_mm
         H = self.cfg.arena_height_mm
         sx, sy = self.cfg.source_x_mm, self.cfg.source_y_mm
         for _ in range(self.cfg.spawn_max_tries):
             x = float(self.rng.uniform(0.0, W))
             y = float(self.rng.uniform(0.0, H))
-            if math.hypot(x - sx, y - sy) < r_min:
+            d = math.hypot(x - sx, y - sy)
+            if d < r_min or d > r_max:
                 continue
             if self.field._base(x, y) >= c_thr:
                 return x, y
