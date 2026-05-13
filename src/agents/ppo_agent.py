@@ -192,11 +192,13 @@ class PPOTrainer:
         self._mask: torch.Tensor | None = None
         self._episode_returns = np.zeros(cfg.num_envs, dtype=np.float64)
         self._episode_lengths = np.zeros(cfg.num_envs, dtype=np.int64)
+        self._episode_casts = np.zeros(cfg.num_envs, dtype=np.int64)
         self._completed_returns: list[float] = []
         self._completed_lengths: list[int] = []
         self._recent_returns: deque[float] = deque(maxlen=max(1, cfg.recent_stats_window))
         self._recent_lengths: deque[int] = deque(maxlen=max(1, cfg.recent_stats_window))
         self._recent_successes: deque[float] = deque(maxlen=max(1, cfg.recent_stats_window))
+        self._recent_casts: deque[float] = deque(maxlen=max(1, cfg.recent_stats_window))
         self._total_steps = 0
         self._update_count = 0
         self._next_checkpoint_step = max(1, cfg.checkpoint_every_timesteps)
@@ -249,6 +251,7 @@ class PPOTrainer:
             f"| ret {payload['recent_return_mean']:.3f} "
             f"| len {payload['recent_episode_length_mean']:.1f} "
             f"| success {payload['recent_success_rate'] * 100.0:.1f}% "
+            f"| casts {payload.get('recent_cast_mean', 0.0):.1f} "
             f"| actor {payload['actor_loss']:.4f} "
             f"| critic {payload['critic_loss']:.4f} "
             f"| ent {payload['entropy']:.4f}"
@@ -379,18 +382,24 @@ class PPOTrainer:
 
                 self._episode_returns += reward_np[:, 0]
                 self._episode_lengths += 1
+                for env_idx in range(self.cfg.num_envs):
+                    if infos[env_idx].get("event_is_high_cast_like", False):
+                        self._episode_casts[env_idx] += 1
                 done_flags = done_np[:, 0] > 0.5
                 for env_idx in np.flatnonzero(done_flags):
                     ep_return = float(self._episode_returns[env_idx])
                     ep_length = int(self._episode_lengths[env_idx])
+                    ep_casts = int(self._episode_casts[env_idx])
                     success = bool(infos[env_idx].get("success", False))
                     self._completed_returns.append(ep_return)
                     self._completed_lengths.append(ep_length)
                     self._recent_returns.append(ep_return)
                     self._recent_lengths.append(ep_length)
                     self._recent_successes.append(1.0 if success else 0.0)
+                    self._recent_casts.append(float(ep_casts))
                     self._episode_returns[env_idx] = 0.0
                     self._episode_lengths[env_idx] = 0
+                    self._episode_casts[env_idx] = 0
 
                 self._obs = next_obs
                 self._actor_state = next_actor_state * next_mask
@@ -416,6 +425,7 @@ class PPOTrainer:
                 "recent_return_mean": float(np.mean(self._recent_returns)) if self._recent_returns else 0.0,
                 "recent_episode_length_mean": float(np.mean(self._recent_lengths)) if self._recent_lengths else 0.0,
                 "recent_success_rate": float(np.mean(self._recent_successes)) if self._recent_successes else 0.0,
+                "recent_cast_mean": float(np.mean(self._recent_casts)) if self._recent_casts else 0.0,
                 **latest_metrics,
             }
             if self._update_count % max(1, self.cfg.log_every_updates) == 0:
