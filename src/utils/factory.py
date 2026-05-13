@@ -1,9 +1,7 @@
-"""Env + agent factories shared by ppo / rsac entry points."""
+"""Env + agent factories shared by ppo / sac entry points."""
 from __future__ import annotations
 
 from typing import Any
-
-import torch
 
 from src.envs.osl_env import EnvConfig, OslEnv
 
@@ -39,7 +37,7 @@ def make_env_config_dict(args, *, noise_stage: int = 0, noise_strength: float = 
 
 def make_env(args, *, seed: int | None = None,
              noise_stage: int = 0, noise_strength: float = 0.0) -> OslEnv:
-    """Construct a single OslEnv. Used for RSAC training and eval."""
+    """Construct a single OslEnv. Used for eval."""
     cfg_dict = make_env_config_dict(args, noise_stage=noise_stage, noise_strength=noise_strength)
     if seed is not None:
         cfg_dict["seed"] = seed
@@ -81,24 +79,37 @@ def make_ppo_trainer(args, run_dir):
     return PPOTrainer(env_cfg, cfg, run_dir=run_dir)
 
 
-def make_rsac_agent(args, env, device: torch.device):
-    from src.agents.rsac_agent import RSACAgent
+def make_sac_trainer(args, run_dir):
+    """Construct a SACTrainer. Curriculum is driven externally via runner.set_noise_stage,
+    identical to the PPO entry point — only the optimisation algorithm differs."""
+    from src.agents.sac_agent import SACConfig, SACTrainer
 
-    return RSACAgent(
-        obs_dim=env.observation_space.shape[0],
-        act_dim=env.action_space.shape[0],
-        action_low=env.action_space.low,
-        action_high=env.action_space.high,
-        device=device,
-        rnn_hidden=args.rnn_hidden,
-        lr_actor=args.lr_actor,
-        lr_critic=args.lr_critic,
-        lr_alpha=args.lr_alpha,
+    env_cfg = make_env_config_dict(args, noise_stage=0, noise_strength=0.0)
+    cfg = SACConfig(
+        rollout_steps=args.sac_rollout_steps,
+        num_envs=args.num_envs,
+        parallel_envs=args.parallel_envs,
+        gradient_steps=args.sac_gradient_steps,
+        batch_size=args.sac_batch_size,
+        learning_starts_steps=args.sac_learning_starts_steps,
         gamma=args.gamma,
-        tau=args.tau,
-        actor_backbone=args.rsac_actor_backbone,
-        connectome_latent_dim=args.latent_dim,
-        connectome_message_passing_steps=args.message_passing_steps,
-        connectome_weights_csv=args.weights_csv,
-        connectome_metadata_csv=args.metadata_csv,
+        tau=args.sac_tau,
+        actor_lr=args.actor_lr,
+        critic_lr=args.critic_lr,
+        alpha_lr=args.sac_alpha_lr,
+        actor_max_grad_norm=args.actor_max_grad_norm,
+        critic_max_grad_norm=args.critic_max_grad_norm,
+        log_std_init=args.log_std_init,
+        buffer_capacity=args.sac_buffer_capacity,
+        latent_dim=args.latent_dim,
+        message_passing_steps=args.message_passing_steps,
+        weights_csv=args.weights_csv,
+        metadata_csv=args.metadata_csv,
+        eval_interval_updates=args.eval_interval_updates,
+        eval_episodes=args.eval_episodes_during_train,
+        log_every_updates=args.log_every_updates,
+        checkpoint_every_timesteps=args.checkpoint_every_timesteps,
+        seed=args.seed,
+        device="cpu" if args.force_cpu else "auto",
     )
+    return SACTrainer(env_cfg, cfg, run_dir=run_dir)

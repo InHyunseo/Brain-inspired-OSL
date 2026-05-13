@@ -1,8 +1,8 @@
 """End-to-end: train + eval. agent_type chooses the path inside each."""
 from __future__ import annotations
 
-from train import _dump_config, _make_run_dir, train_ppo, train_rsac
-from eval import _apply_conf_overrides, _load_conf, eval_ppo, eval_rsac
+from train import _dump_config, _make_run_dir, train_ppo, train_sac
+from eval import _apply_conf_overrides, _load_conf, eval_ppo, eval_sac
 from src.utils.config import build_parser
 from src.utils.seed import set_global_seed
 
@@ -22,8 +22,8 @@ def main():
     print("=" * 50)
     if args.agent_type == "ppo":
         train_ppo(args, run_dir)
-    elif args.agent_type == "rsac":
-        train_rsac(args, run_dir)
+    elif args.agent_type == "sac":
+        train_sac(args, run_dir)
     else:
         raise ValueError(f"Unsupported agent_type: {args.agent_type}")
 
@@ -36,7 +36,7 @@ def main():
     if args.agent_type == "ppo":
         eval_ppo(args, run_dir)
     else:
-        eval_rsac(args, run_dir)
+        eval_sac(args, run_dir)
 
     print(f"\n[done] outputs in {run_dir}")
 

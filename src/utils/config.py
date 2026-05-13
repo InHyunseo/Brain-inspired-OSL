@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-cpu", action="store_true")
 
     # Agent
-    p.add_argument("--agent-type", choices=["ppo", "rsac"], default="ppo")
+    p.add_argument("--agent-type", choices=["ppo", "sac"], default="ppo")
 
     # Env (shared)
     p.add_argument("--sensor-spacing-mm", type=float, default=0.15)
@@ -104,22 +104,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checkpoint-every-timesteps", type=int, default=100_000)
     p.add_argument("--parallel-envs", action=argparse.BooleanOptionalAction, default=True)
 
-    # RSAC
-    p.add_argument("--total-episodes", type=int, default=20000)
-    p.add_argument("--lr-actor", type=float, default=3e-4)
-    p.add_argument("--lr-critic", type=float, default=3e-4)
-    p.add_argument("--lr-alpha", type=float, default=3e-4)
-    p.add_argument("--tau", type=float, default=0.005)
-    p.add_argument("--rnn-hidden", type=int, default=147)
-    p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--seq-len", type=int, default=16)
-    p.add_argument("--buffer-size", type=int, default=150_000)
-    p.add_argument("--learning-starts", type=int, default=5000)
-    p.add_argument("--log-every", type=int, default=20)
-    p.add_argument("--rsac-actor-backbone", choices=["gru", "connectome", "mlp"], default="connectome")
-    # Eval-time noise schedule for RSAC (single env)
-    p.add_argument("--rsac-noise-stage", type=int, default=0)
-    p.add_argument("--rsac-noise-strength", type=float, default=0.0)
+    # SAC (shares PPO's --curriculum-phases, --num-envs, --parallel-envs,
+    # --actor-lr/--critic-lr, --actor-max-grad-norm/--critic-max-grad-norm,
+    # --gamma, --log-std-init, --latent-dim, --message-passing-steps, --weights-csv,
+    # --metadata-csv, --eval-interval-updates, --eval-episodes-during-train,
+    # --log-every-updates, --checkpoint-every-timesteps).
+    p.add_argument("--sac-rollout-steps", type=int, default=32,
+                   help="Env steps per env collected between SAC update cycles.")
+    p.add_argument("--sac-gradient-steps", type=int, default=32,
+                   help="SAC minibatch updates per rollout cycle.")
+    p.add_argument("--sac-batch-size", type=int, default=256)
+    p.add_argument("--sac-buffer-capacity", type=int, default=200_000)
+    p.add_argument("--sac-learning-starts-steps", type=int, default=5000)
+    p.add_argument("--sac-tau", type=float, default=0.005,
+                   help="Polyak rate for target-Q soft update.")
+    p.add_argument("--sac-alpha-lr", type=float, default=3e-4,
+                   help="Learning rate for the entropy temperature α.")
 
     # Eval (shared)
     p.add_argument("--eval-episodes", type=int, default=100)

@@ -1,4 +1,4 @@
 from src.agents.ppo_agent import PPOConfig, PPOTrainer
-from src.agents.rsac_agent import RSACAgent
+from src.agents.sac_agent import SACConfig, SACTrainer
 
-__all__ = ["PPOConfig", "PPOTrainer", "RSACAgent"]
+__all__ = ["PPOConfig", "PPOTrainer", "SACConfig", "SACTrainer"]

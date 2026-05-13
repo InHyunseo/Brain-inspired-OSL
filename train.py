@@ -1,10 +1,9 @@
-"""Unified training entry. Branches on --agent-type {ppo, rsac}.
+"""Unified training entry. Branches on --agent-type {ppo, sac}.
 
-PPO  : custom on-policy trainer with separate actor (larva connectome) /
-       critic (MLP). Curriculum advances noise stages between phases by
-       broadcasting set_noise_stage to the parallel env runner.
-RSAC : single-env episode loop with selectable backbone (connectome / gru / mlp)
-       for biological-fidelity baselines.
+Both agents share the same parallel env runner, curriculum loop, connectome
+backbone, logging, checkpointing, and eval. The only difference is the
+optimisation algorithm: PPO (on-policy, clipped surrogate) vs SAC (off-policy,
+twin Q + auto-α).
 
 Outputs land under runs/{agent}_{run_name}_{timestamp}/.
 """
@@ -14,13 +13,10 @@ import json
 import os
 import time
 
-import numpy as np
 import torch
 
-from src.utils.buffer import EpisodeReplayBuffer
 from src.utils.config import build_parser, parse_curriculum_phases
-from src.utils.factory import make_env, make_ppo_trainer, make_rsac_agent
-from src.utils.plotter import plot_training_pngs_from_data, save_training_plot_data
+from src.utils.factory import make_ppo_trainer, make_sac_trainer
 from src.utils.seed import set_global_seed
 
 
@@ -47,21 +43,12 @@ def _device(args):
     return torch.device("cuda")
 
 
-# ---------------------------------------------------------------------------
-# PPO trainer
-# ---------------------------------------------------------------------------
-
-
-def train_ppo(args, run_dir):
-    phases = parse_curriculum_phases(args)
-    if not phases:
-        raise ValueError("No curriculum phases specified.")
-
-    trainer = make_ppo_trainer(args, run_dir=run_dir)
+def _train_curriculum(trainer, phases, agent_label: str) -> None:
+    """Drive curriculum via runner.set_noise_stage. Shared by PPO and SAC."""
     summary = {}
     try:
         for i, (stage, strength, steps) in enumerate(phases):
-            print(f"\n=== PPO Phase {i}: noise_stage={stage} strength={strength} steps={steps} ===")
+            print(f"\n=== {agent_label} Phase {i}: noise_stage={stage} strength={strength} steps={steps} ===")
             trainer.runner.set_noise_stage(stage, strength)
             summary = trainer.train(phase_timesteps=steps)
         trainer.save_final(summary)
@@ -70,72 +57,20 @@ def train_ppo(args, run_dir):
         trainer.close()
 
 
-# ---------------------------------------------------------------------------
-# RSAC episode-loop trainer
-# ---------------------------------------------------------------------------
+def train_ppo(args, run_dir):
+    phases = parse_curriculum_phases(args)
+    if not phases:
+        raise ValueError("No curriculum phases specified.")
+    trainer = make_ppo_trainer(args, run_dir=run_dir)
+    _train_curriculum(trainer, phases, agent_label="PPO")
 
 
-def train_rsac(args, run_dir):
-    env = make_env(
-        args,
-        seed=args.seed,
-        noise_stage=args.rsac_noise_stage,
-        noise_strength=args.rsac_noise_strength,
-    )
-    device = _device(args)
-    agent = make_rsac_agent(args, env, device)
-    buffer = EpisodeReplayBuffer(cap_steps=args.buffer_size)
-
-    best_return = -float("inf")
-    ep_returns, ep_steps_to_goal = [], []
-
-    for ep in range(1, args.total_episodes + 1):
-        obs, _ = env.reset(seed=args.seed + ep)
-        h = None
-        traj = []
-        ep_ret = 0.0
-        steps_in_ep = 0
-        success_step = None
-
-        while True:
-            action, h = agent.get_action(obs, h)
-            next_obs, reward, terminated, truncated, info = env.step(action)
-            done = bool(terminated or truncated)
-            terminal = float(terminated)
-            traj.append((obs, action, float(reward), next_obs, terminal))
-
-            obs = next_obs
-            ep_ret += float(reward)
-            steps_in_ep += 1
-            if info.get("success") and success_step is None:
-                success_step = steps_in_ep
-            if done:
-                break
-
-        buffer.add_episode(traj)
-        ep_returns.append(ep_ret)
-        ep_steps_to_goal.append(success_step if success_step is not None else steps_in_ep)
-
-        if len(buffer) >= args.learning_starts:
-            batch = buffer.sample(args.batch_size, args.seq_len)
-            agent.update(batch)
-
-        if ep_ret > best_return:
-            best_return = ep_ret
-            agent.save(os.path.join(run_dir, "checkpoints", "best.pt"))
-        if ep == 100:
-            agent.save(os.path.join(run_dir, "checkpoints", "first.pt"))
-
-        if ep % args.log_every == 0:
-            recent = ep_returns[-args.log_every :]
-            print(
-                f"[ep {ep:5d}] return={ep_ret:7.2f}  recent_mean={np.mean(recent):7.2f}"
-                f"  steps={steps_in_ep}  buffer={len(buffer)}"
-            )
-
-    agent.save(os.path.join(run_dir, "checkpoints", "final.pt"))
-    save_training_plot_data(run_dir, ep_returns, ep_steps_to_goal)
-    plot_training_pngs_from_data(run_dir)
+def train_sac(args, run_dir):
+    phases = parse_curriculum_phases(args)
+    if not phases:
+        raise ValueError("No curriculum phases specified.")
+    trainer = make_sac_trainer(args, run_dir=run_dir)
+    _train_curriculum(trainer, phases, agent_label="SAC")
 
 
 def main(argv=None):
@@ -150,8 +85,8 @@ def main(argv=None):
 
     if args.agent_type == "ppo":
         train_ppo(args, run_dir)
-    elif args.agent_type == "rsac":
-        train_rsac(args, run_dir)
+    elif args.agent_type == "sac":
+        train_sac(args, run_dir)
     else:
         raise ValueError(f"Unsupported agent_type: {args.agent_type}")
 
