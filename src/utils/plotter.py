@@ -125,13 +125,20 @@ def plot_training_pngs_from_data(run_dir):
 
 
 def _plume_field(env, resolution=120):
+    """Sample the current odor field (base Gaussian × current bump perturbation).
+
+    Calls `env.field.sample(x, y)` per pixel so the rendered field includes the
+    dynamic bump perturbation at the current env time — not the noise-free base.
+    The bump sum is vectorised inside; the per-pixel Python loop is fine at
+    120×120.
+    """
     cfg = env.cfg
     xs = np.linspace(0.0, cfg.arena_width_mm, resolution)
     ys = np.linspace(0.0, cfg.arena_height_mm, resolution)
     field = np.zeros((resolution, resolution), dtype=np.float32)
     for j, y in enumerate(ys):
         for i, x in enumerate(xs):
-            field[j, i] = env.field._base(float(x), float(y))
+            field[j, i] = env.field.sample(float(x), float(y))
     return field, cfg.arena_width_mm, cfg.arena_height_mm
 
 
@@ -143,8 +150,11 @@ def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
     fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor("black")
     ax.set_facecolor("black")
+    # Bumps can push c above c_peak temporarily; use 1.4×c_peak so the colour
+    # scale stays stable across the rollout instead of clipping every frame.
+    vmax = float(cfg.c_peak) * 1.4
     ax.imshow(field, extent=[0.0, W, 0.0, H], origin="lower", cmap="inferno",
-              vmin=0.0, vmax=float(cfg.c_peak))
+              vmin=0.0, vmax=vmax)
     ax.plot(traj_x, traj_y, color="#50dcff", linewidth=2.0, alpha=0.85)
     if cast_x:
         ax.scatter(cast_x, cast_y, color="white", marker="*", s=140,
