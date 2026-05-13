@@ -52,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Coefficient on dlog(c)/dt chemotaxis shaping (clipped).")
     p.add_argument("--reward-log-clip", type=float, default=0.5,
                    help="Symmetric clip on the dlog/dt shaping term.")
+    p.add_argument("--reward-conc-k", type=float, default=0.02,
+                   help="Dense reward coefficient on normalized current concentration (c_avg / c_peak).")
     p.add_argument("--reward-time-penalty", type=float, default=-0.005,
                    help="Basal metabolism per step (alive cost).")
     p.add_argument("--reward-run-cost", type=float, default=-0.01,

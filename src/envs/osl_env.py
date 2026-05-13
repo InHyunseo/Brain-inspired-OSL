@@ -52,6 +52,12 @@ class EnvConfig:
     # Clipped to ±reward_log_clip to keep dlog/dt from exploding near c=0.
     reward_log_k: float = 0.05
     reward_log_clip: float = 0.5
+    # Dense concentration reward: proportional to current normalized sensor
+    # average c_avg / c_peak. Provides a smooth potential field toward the
+    # source so the agent always knows which way is "warmer", independent of
+    # the (noisy, clipped) dlog/dt term. Keep small so the cumulative dense
+    # reward stays below reward_goal over an episode.
+    reward_conc_k: float = 0.02
     # Basal metabolism: alive-cost per step.
     reward_time_penalty: float = -0.005
     # Movement energy ∝ v² / ω², per step (normalized actions in [-1, 1]).
@@ -241,6 +247,10 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         # Basal metabolism — alive cost per step.
         reward_time = self.cfg.reward_time_penalty
 
+        # Dense concentration reward: normalized current sensor average.
+        c_peak = max(self.cfg.c_peak, self.cfg.epsilon)
+        reward_conc = self.cfg.reward_conc_k * (float(info["sensor_avg"]) / c_peak)
+
         # Movement-energy cost (∝ v² / ω²). The head sweep is the most
         # expensive emergent action; doubled when the body is stopped, which
         # is biologically equivalent to a "cast" (head-only swing).
@@ -269,6 +279,7 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         reward = (
             reward_goal
             + reward_log
+            + reward_conc
             + reward_time
             + reward_motion
             + reward_wall
@@ -279,6 +290,7 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
             {
                 "reward_goal": reward_goal,
                 "reward_log": reward_log,
+                "reward_conc": reward_conc,
                 "reward_time": reward_time,
                 "reward_run": reward_run,
                 "reward_body_turn": reward_body_turn,

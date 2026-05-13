@@ -26,6 +26,7 @@ def make_env_config_dict(args, *, noise_stage: int = 0, noise_strength: float = 
         "reward_goal": args.reward_goal,
         "reward_log_k": args.reward_log_k,
         "reward_log_clip": args.reward_log_clip,
+        "reward_conc_k": args.reward_conc_k,
         "reward_time_penalty": args.reward_time_penalty,
         "reward_run_cost": args.reward_run_cost,
         "reward_body_turn_cost": args.reward_body_turn_cost,
