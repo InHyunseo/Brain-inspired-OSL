@@ -11,13 +11,16 @@ import argparse
 import json
 
 
-# Default 4-phase noise curriculum: [noise_stage, noise_strength, timesteps].
-# Stage 0 = clean Gaussian, stage 1 = static white noise, stage 2 = temporally
-# correlated noise (advanced each step). Strength scales the noise variance.
+# Default 5-phase bump-field curriculum: [noise_stage, noise_strength, timesteps].
+# Stage 0 = clean Gaussian. Stage 1 = STATIC bump field (frozen after reset).
+# Stage 2 = DYNAMIC bump field (drift + AR(1) amplitude + occasional respawn).
+# `noise_strength` is the curriculum scalar α ∈ [0, 1] that scales every bump
+# parameter (count, amp_max, drift_speed, lifetime_inv, respawn_prob).
 DEFAULT_PHASES_JSON = json.dumps([
-    [0, 0.0, 1_500_000],
+    [0, 0.0, 1_000_000],
     [1, 0.3, 500_000],
-    [1, 0.6, 500_000],
+    [2, 0.3, 500_000],
+    [2, 0.6, 500_000],
     [2, 1.0, 1_000_000],
 ])
 

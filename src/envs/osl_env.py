@@ -28,6 +28,15 @@ class EnvConfig:
     initial_heading_rad: float = math.pi / 2.0
     randomize_heading: bool = True
     success_radius_mm: float = 7.5
+    # Spawn policy: sample (x, y) uniformly inside the region where the *base*
+    # Gaussian field exceeds `spawn_c_thresh_frac * c_peak`, and at least
+    # `spawn_min_radius_mm` away from the source. Heading is initialised toward
+    # the source with Gaussian error of std `spawn_heading_std_rad`.
+    randomize_spawn: bool = True
+    spawn_c_thresh_frac: float = 0.05
+    spawn_min_radius_mm: float = 15.0
+    spawn_max_tries: int = 200
+    spawn_heading_std_rad: float = math.radians(30.0)
     terminate_on_wall: bool = True
     wall_penalty: float = -2.0
     gaussian_sigma_mm: float = 30.0
@@ -36,8 +45,6 @@ class EnvConfig:
     epsilon: float = 1e-8
     noise_stage: int = 0
     noise_strength: float = 0.0
-    noise_rho: float = 0.94
-    noise_grid_spacing_mm: float = 0.05
     v_max_mm_s: float = 1.2
     body_omega_max_deg_s: float = 120.0
     head_omega_max_deg_s: float = 240.0
@@ -107,10 +114,8 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
             epsilon=self.cfg.epsilon,
             noise_stage=self.cfg.noise_stage,
             noise_strength=self.cfg.noise_strength,
-            noise_rho=self.cfg.noise_rho,
             arena_width_mm=self.cfg.arena_width_mm,
             arena_height_mm=self.cfg.arena_height_mm,
-            noise_grid_spacing_mm=self.cfg.noise_grid_spacing_mm,
             rng=self.rng,
         )
         self.max_steps = int(round(self.cfg.episode_seconds / self.cfg.dt))
@@ -126,16 +131,49 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         self.field.noise_strength = float(strength)
         self.field.rebuild_noise_grid(initial=True)
 
+    def _sample_spawn_xy(self) -> tuple[float, float]:
+        """Rejection-sample (x, y) inside the cue region of the *base* Gaussian.
+
+        We threshold on the noise-free field so the spawnable region is stable
+        across curriculum phases. Falls back to the threshold-satisfying point
+        farthest from the source if rejection fails.
+        """
+        c_thr = self.cfg.spawn_c_thresh_frac * self.cfg.c_peak
+        r_min = self.cfg.spawn_min_radius_mm
+        W = self.cfg.arena_width_mm
+        H = self.cfg.arena_height_mm
+        sx, sy = self.cfg.source_x_mm, self.cfg.source_y_mm
+        for _ in range(self.cfg.spawn_max_tries):
+            x = float(self.rng.uniform(0.0, W))
+            y = float(self.rng.uniform(0.0, H))
+            if math.hypot(x - sx, y - sy) < r_min:
+                continue
+            if self.field._base(x, y) >= c_thr:
+                return x, y
+        # Fallback: ring at r_min along a random angle (still satisfies min radius).
+        theta = float(self.rng.uniform(-math.pi, math.pi))
+        x = float(np.clip(sx + r_min * math.cos(theta), 0.0, W))
+        y = float(np.clip(sy + r_min * math.sin(theta), 0.0, H))
+        return x, y
+
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self.field.rng = self.rng
         self.step_count = 0
-        self.x_mm = self.cfg.initial_x_mm
-        self.y_mm = self.cfg.initial_y_mm
-        self.heading_rad = self.cfg.initial_heading_rad
-        if self.cfg.randomize_heading:
-            self.heading_rad = float(self.rng.uniform(-math.pi, math.pi))
+        if self.cfg.randomize_spawn:
+            self.x_mm, self.y_mm = self._sample_spawn_xy()
+            dx = self.cfg.source_x_mm - self.x_mm
+            dy = self.cfg.source_y_mm - self.y_mm
+            heading_to_source = math.atan2(dy, dx)
+            err = float(self.rng.normal(0.0, self.cfg.spawn_heading_std_rad))
+            self.heading_rad = wrap_angle(heading_to_source + err)
+        else:
+            self.x_mm = self.cfg.initial_x_mm
+            self.y_mm = self.cfg.initial_y_mm
+            self.heading_rad = self.cfg.initial_heading_rad
+            if self.cfg.randomize_heading:
+                self.heading_rad = float(self.rng.uniform(-math.pi, math.pi))
         self.head_relative_angle_rad = self.cfg.initial_head_relative_angle_rad
         self.prev_action = np.zeros(ACTION_DIM, dtype=np.float32)
         self.prev_logs: list[dict[str, float]] = []
