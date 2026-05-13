@@ -124,22 +124,24 @@ def plot_training_pngs_from_data(run_dir):
 # ---------------------------------------------------------------------------
 
 
-def _plume_field(env, resolution=120):
-    """Sample the current odor field (base Gaussian × current bump perturbation).
-
-    Calls `env.field.sample(x, y)` per pixel so the rendered field includes the
-    dynamic bump perturbation at the current env time — not the noise-free base.
-    The bump sum is vectorised inside; the per-pixel Python loop is fine at
-    120×120.
-    """
+def _plume_field(env, grid_mm: float = 0.5):
+    """Sample the current odor field (base × current bump perturbation) on the
+    same grid the curriculum viz uses (default 0.5 mm/pixel) so the two views
+    look consistent."""
     cfg = env.cfg
-    xs = np.linspace(0.0, cfg.arena_width_mm, resolution)
-    ys = np.linspace(0.0, cfg.arena_height_mm, resolution)
-    field = np.zeros((resolution, resolution), dtype=np.float32)
+    xs = np.arange(0.0, cfg.arena_width_mm + grid_mm, grid_mm)
+    ys = np.arange(0.0, cfg.arena_height_mm + grid_mm, grid_mm)
+    field = np.empty((len(ys), len(xs)), dtype=np.float32)
     for j, y in enumerate(ys):
         for i, x in enumerate(xs):
             field[j, i] = env.field.sample(float(x), float(y))
     return field, cfg.arena_width_mm, cfg.arena_height_mm
+
+
+# vmax cache keyed by id(env): set on the first call for an env, reused after.
+# Matches the curriculum viz behaviour (auto-scale to the first sampled field)
+# while keeping the colour scale stable across frames of one rollout.
+_RENDER_VMAX_CACHE: dict[int, float] = {}
 
 
 def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
@@ -150,10 +152,11 @@ def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
     fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor("black")
     ax.set_facecolor("black")
-    # Bumps can push c above c_peak temporarily; use 1.4×c_peak so the colour
-    # scale stays stable across the rollout instead of clipping every frame.
-    vmax = float(cfg.c_peak) * 1.4
-    ax.imshow(field, extent=[0.0, W, 0.0, H], origin="lower", cmap="inferno",
+    cache_key = id(env)
+    if cache_key not in _RENDER_VMAX_CACHE:
+        _RENDER_VMAX_CACHE[cache_key] = max(1e-6, float(field.max()) * 1.2)
+    vmax = _RENDER_VMAX_CACHE[cache_key]
+    ax.imshow(field, extent=[0.0, W, 0.0, H], origin="lower", cmap="magma",
               vmin=0.0, vmax=vmax)
     ax.plot(traj_x, traj_y, color="#50dcff", linewidth=2.0, alpha=0.85)
     if cast_x:
