@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from Analysis.ncp_policy import NCPPolicy, NCPPolicyConfig, action_to_env
+from Analysis.ncp_core import NCPCore, NCPCoreConfig, action_to_env
 from Analysis.pendulum_pomdp import VelocityMaskedPendulum
 
 
@@ -30,16 +30,16 @@ def parse_args():
     return p.parse_args()
 
 
-def load_policy(ckpt_path: Path, device) -> NCPPolicy:
+def load_policy(ckpt_path: Path, device) -> NCPCore:
     blob = torch.load(ckpt_path, map_location=device, weights_only=False)
-    cfg = NCPPolicyConfig(**blob["config"])
-    policy = NCPPolicy(cfg).to(device)
+    cfg = NCPCoreConfig(**blob["config"])
+    policy = NCPCore(cfg).to(device)
     policy.load_state_dict(blob["state_dict"])
     policy.eval()
     return policy
 
 
-def rollout(policy: NCPPolicy, env_seed: int, max_steps: int, device, deterministic: bool):
+def rollout(policy: NCPCore, env_seed: int, max_steps: int, device, deterministic: bool):
     env = VelocityMaskedPendulum()
     obs, info = env.reset(seed=env_seed)
     h = policy.initial_state(1, device=device)

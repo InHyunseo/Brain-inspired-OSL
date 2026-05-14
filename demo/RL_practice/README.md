@@ -1,4 +1,3 @@
-````md
 # CartPole Actor-Critic (PyTorch) + 학습로그/플롯/GIF 저장
 
 Gymnasium `CartPole-v1` 환경에서 **Actor-Critic**(공유 MLP trunk + actor/critic head)로 학습하고, 학습 결과를 `runs/` 아래에 자동 저장하는 단일 스크립트입니다.
@@ -226,7 +225,101 @@ adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
 ---
 
-## 8) 참고/주의사항
+## 8) 분석 피봇: trace/probe/patching
+
+이 데모는 본 실험(OSL/connectome 분석)로 가기 전에 분석 프레임워크가 제대로 작동하는지 확인하는 작은 sanity-check 환경으로도 사용합니다. CartPole은 행동 모드가 단순하므로 과학적 발견보다는 다음을 검증하는 목적입니다.
+
+* 학습된 정책의 rollout trace를 episode 단위로 저장할 수 있는가
+* MLP hidden activation을 추출해 state variable probe를 할 수 있는가
+* hidden activation patching이 실제 행동 성능을 바꾸는가
+* CSV/NPZ 결과를 다시 읽어 요약 figure를 만들 수 있는가
+
+### 8.1 실행 순서
+
+GIF 저장까지 원하면 classic-control 렌더 의존성을 설치합니다.
+
+```bash
+pip install "gymnasium[classic-control]"
+```
+
+학습:
+
+```bash
+cd /home/hyunseo/Personal/2d-osl
+python -c "from demo.RL_practice.train_cartpole_ac import train; train(total_episodes=2000, seed=0, force_cpu=True, run_name='cartpole_ac_analysis_seed0')"
+```
+
+분석:
+
+```bash
+python -m demo.RL_practice.analyze_cartpole_ac \
+  --run-dir demo/RL_practice/runs/cartpole_ac_analysis_seed0 \
+  --checkpoint final \
+  --episodes 20 \
+  --seed 123 \
+  --device cpu
+```
+
+그림 생성:
+
+```bash
+python -m demo.RL_practice.plot_cartpole_analysis \
+  --run-dir demo/RL_practice/runs/cartpole_ac_analysis_seed0
+```
+
+### 8.2 분석 출력물
+
+```text
+runs/cartpole_ac_analysis_seed0/
+  eval/
+    trace_final_seed123_ep000.npz
+    ...
+  analysis/
+    baseline_eval.csv
+    probe_results.csv
+    patch_results.csv
+  plots/
+    training_curves.png
+    analysis_baseline_summary.png
+    analysis_probe_r2.png
+    analysis_patch_group_delta_steps.png
+    analysis_unit_ablation_top.png
+    analysis_unit_ablation_scan.png
+```
+
+`eval/trace_*.npz`에는 `obs`, `action`, `raw_reward`, `shaped_reward`, `logits`, `value`, `hidden`, `terminated`, `truncated`가 저장됩니다.
+
+`analysis/baseline_eval.csv`는 patch 없는 deterministic eval 결과입니다. CartPole에서는 final policy가 잘 학습되면 `steps`가 500 근처이고 `success`가 1에 가까워야 합니다.
+
+`analysis/probe_results.csv`는 hidden activation으로 `theta`, `theta_dot`을 선형 복원한 R²입니다. CartPole은 이 값들이 observation에 직접 들어 있으므로 R²가 높게 나오는 것이 정상입니다.
+
+`analysis/patch_results.csv`는 hidden activation patching 결과입니다. v1 patch 대상은 `all_hidden`, `first_half`, `second_half`, 그리고 unit-wise zero ablation입니다. `delta_steps`가 음수이면 patch 때문에 baseline보다 빨리 실패했다는 뜻입니다.
+
+### 8.3 현재 관찰된 결과 요약
+
+`cartpole_ac_analysis_seed0` run 기준:
+
+* baseline은 20개 eval seed 모두 500 step 성공(`success_rate=1.0`)으로 완전히 학습됨
+* `theta`, `theta_dot` probe R²는 거의 1.0으로 hidden에 상태 정보가 선형적으로 잘 담김
+* `all_hidden` patch는 약 `-490 steps`로 정책을 즉시 망가뜨림
+* `first_half`/`second_half`를 zero 또는 mean으로 지우는 것은 거의 영향이 없었지만, flip은 치명적이었음
+* 단일 hidden unit zero ablation은 대부분 `delta_steps=0`으로, 표현이 단일 unit보다 분산/중복되어 있음을 시사함
+
+해석은 보수적으로 해야 합니다. CartPole은 단순 균형 과제라서 run/cast/turn 같은 행동 모드가 없습니다. 따라서 이 결과는 기전 발견보다는 분석 plumbing 검증입니다.
+
+### 8.4 본 실험으로 옮길 때 바꿀 부분
+
+이 프레임워크는 본 실험에 그대로 가져가되, 아래 부분만 환경/정책에 맞게 교체하면 됩니다.
+
+* `trace dump`: CartPole의 `obs/action/reward/hidden` 대신 OSL의 trajectory, sensor readings, action channels, event labels, connectome state를 저장
+* `probe`: `theta/theta_dot` 대신 bearing, distance, sensor asymmetry, `dlog concentration`, event label 등을 target으로 사용
+* `patch`: MLP hidden index 대신 connectome cell type/group index를 사용하고, zero/mean/flip patch를 actor forward에 적용
+* `figures`: baseline step/success 대신 OSL success, path efficiency, event ratio, cast frequency, patch-induced behavior shift를 그림으로 요약
+* `dynamics`: CartPole v1에서는 제외했지만, recurrent/connectome state가 있는 본 실험에서는 segment-conditioned Jacobian/eigenvalue 분석을 추가
+
+---
+
+## 9) 참고/주의사항
 
 * Gymnasium 버전에 따라 `render_mode="rgb_array"` 동작이 다를 수 있습니다. GIF가 비어 있으면 gymnasium 버전과 렌더 옵션을 확인하세요.
 * shaped reward는 원래 CartPole 보상과 스케일이 다르므로, `reward_scale`을 너무 크게 하면 학습이 불안정해질 수 있습니다.
@@ -234,5 +327,4 @@ adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
 ---
 
-```
-```
+

@@ -10,11 +10,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-# --- plotting / gif ---
-import matplotlib
-matplotlib.use("Agg")  # headless 저장용
-import matplotlib.pyplot as plt
-
 # --- 상대경로를 통한 결과 저장 ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT_DIR = os.path.join(SCRIPT_DIR, "runs")
@@ -35,10 +30,43 @@ class ActorCritic(nn.Module):
         self.actor = nn.Linear(hidden, act_dim)   # logits
         self.critic = nn.Linear(hidden, 1)        # V(s)
 
-    def forward(self, x):
+    def _apply_hidden_patch(self, h, patch):
+        if patch is None:
+            return h
+
+        h_was_1d = h.dim() == 1
+        h_view = h.unsqueeze(0) if h_was_1d else h
+        h_new = h_view.clone()
+
+        indices = patch.get("indices")
+        if indices is None:
+            indices = torch.arange(h_new.shape[-1], device=h_new.device)
+        elif not torch.is_tensor(indices):
+            indices = torch.as_tensor(indices, dtype=torch.long, device=h_new.device)
+        else:
+            indices = indices.to(device=h_new.device, dtype=torch.long)
+
+        selected = h_new.index_select(-1, indices)
+        value = patch.get("value", "zero")
+        if value == "zero":
+            replacement = torch.zeros_like(selected)
+        elif value == "mean":
+            replacement = selected.mean(dim=-1, keepdim=True).expand_as(selected)
+        elif value == "flip":
+            replacement = -selected
+        else:
+            replacement = torch.full_like(selected, float(value))
+
+        h_new.index_copy_(-1, indices, replacement)
+        return h_new.squeeze(0) if h_was_1d else h_new
+
+    def forward(self, x, patch=None, return_hidden=False):
         h = self.body(x)
+        h = self._apply_hidden_patch(h, patch)
         logits = self.actor(h)
         value = self.critic(h).squeeze(-1)
+        if return_hidden:
+            return logits, value, h
         return logits, value
 
 
@@ -77,6 +105,10 @@ def moving_avg(x, window=50):
 
 
 def save_training_figure(run_dir, episodes, steps, returns, actor_losses, critic_losses, window=50):
+    import matplotlib
+    matplotlib.use("Agg")  # headless 저장용
+    import matplotlib.pyplot as plt
+
     plots_dir = os.path.join(run_dir, "plots")
     os.makedirs(plots_dir, exist_ok=True)
 
@@ -157,35 +189,45 @@ def save_gif(frames, path, fps=30):
 
 @torch.no_grad()
 def rollout_video_gif(env_id, model, device, seed, out_gif_path, fps=30, deterministic=True):
-    env = gym.make(env_id, render_mode="rgb_array")
-    obs, info = env.reset(seed=seed)
+    env = None
+    try:
+        env = gym.make(env_id, render_mode="rgb_array")
+        obs, info = env.reset(seed=seed)
 
-    frames = []
-    frame = env.render()
-    if frame is not None:
-        frames.append(frame)
-
-    done = False
-    while not done:
-        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
-        logits, value = model(obs_t)
-
-        if deterministic:
-            action = torch.argmax(logits).item()
-        else:
-            dist = Categorical(logits=logits)
-            action = int(dist.sample().item())
-
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        done = bool(terminated or truncated)
-
+        frames = []
         frame = env.render()
         if frame is not None:
             frames.append(frame)
 
-        obs = next_obs
+        done = False
+        while not done:
+            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            logits, value = model(obs_t)
 
-    env.close()
+            if deterministic:
+                action = torch.argmax(logits).item()
+            else:
+                dist = Categorical(logits=logits)
+                action = int(dist.sample().item())
+
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            done = bool(terminated or truncated)
+
+            frame = env.render()
+            if frame is not None:
+                frames.append(frame)
+
+            obs = next_obs
+    except gym.error.DependencyNotInstalled as exc:
+        print(f"[warn] GIF skipped for {out_gif_path}: {exc}")
+        return []
+    finally:
+        if env is not None:
+            env.close()
+
+    if not frames:
+        print(f"[warn] GIF skipped for {out_gif_path}: no frames rendered.")
+        return []
     save_gif(frames, out_gif_path, fps=fps)
     return frames
 

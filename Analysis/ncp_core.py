@@ -30,7 +30,7 @@ from ncps.wirings import AutoNCP
 
 
 @dataclass
-class NCPPolicyConfig:
+class NCPCoreConfig:
     obs_dim: int = 2
     action_dim: int = 1
     units: int = 32
@@ -71,12 +71,12 @@ def _apply_patch(h: torch.Tensor, patch: Optional[dict]) -> torch.Tensor:
     return h_new
 
 
-class NCPPolicy(nn.Module):
+class NCPCore(nn.Module):
     """CfC + AutoNCP actor-critic with patch hook and group metadata."""
 
-    def __init__(self, cfg: NCPPolicyConfig | None = None):
+    def __init__(self, cfg: NCPCoreConfig | None = None):
         super().__init__()
-        self.cfg = cfg or NCPPolicyConfig()
+        self.cfg = cfg or NCPCoreConfig()
         c = self.cfg
 
         self.wiring = AutoNCP(
