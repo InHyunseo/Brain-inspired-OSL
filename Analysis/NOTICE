@@ -1,0 +1,13 @@
+This subproject (2d-osl/Analysis/) depends on the following third-party
+open-source software via pip:
+
+- Neural Circuit Policies (ncps)
+  Copyright 2022 Mathias Lechner & Ramin Hasani
+  Licensed under the Apache License, Version 2.0.
+  Source: https://github.com/mlech26l/ncps
+
+- gymnasium, scikit-learn, torch, numpy, scipy, matplotlib
+  Used under their respective licenses (BSD-3 / Apache-2.0).
+
+No source code from these projects is vendored; they are installed as
+dependencies via requirements.txt.
