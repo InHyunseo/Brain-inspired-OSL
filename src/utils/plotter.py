@@ -179,7 +179,30 @@ def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
     return np.array(imageio.v2.imread(buf))
 
 
+def _harmonize_frames(frames):
+    """Crop all frames to the common (min) H×W so they stack into a GIF.
+
+    `render_rollout_frame` uses `bbox_inches="tight"`, so frame pixel dimensions
+    can drift by a row/column as the title text width changes across steps.
+    imageio's stacking then fails with "all input arrays must have the same
+    shape". Center-crop every frame to the smallest height/width to fix it.
+    """
+    if not frames:
+        return frames
+    min_h = min(f.shape[0] for f in frames)
+    min_w = min(f.shape[1] for f in frames)
+    if all(f.shape[0] == min_h and f.shape[1] == min_w for f in frames):
+        return frames
+    out = []
+    for f in frames:
+        h, w = f.shape[:2]
+        top = (h - min_h) // 2
+        left = (w - min_w) // 2
+        out.append(f[top:top + min_h, left:left + min_w])
+    return out
+
+
 def save_gif(frames, path, fps=15):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    imageio.mimsave(path, frames, fps=fps, loop=0)
+    imageio.mimsave(path, _harmonize_frames(frames), fps=fps, loop=0)
     print(f"[GIF] Saved to {path}")

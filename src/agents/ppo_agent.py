@@ -42,6 +42,8 @@ class PPOConfig:
     actor_max_grad_norm: float = 0.5
     critic_max_grad_norm: float = 0.5
     log_std_init: float = -0.5
+    backbone: str = "connectome"       # "connectome" | "gru"
+    gru_hidden: int = 421              # GRU hidden (≈ connectome's 423-node state, for scale parity)
     latent_dim: int = 32
     message_passing_steps: int = 6
     weights_csv: str = "assets/connectome/weights.csv"
@@ -151,6 +153,8 @@ class PPOTrainer:
             latent_dim=cfg.latent_dim,
             message_passing_steps=cfg.message_passing_steps,
             log_std_init=cfg.log_std_init,
+            backbone=cfg.backbone,
+            gru_hidden=cfg.gru_hidden,
         ).to(self.device)
 
         self.actor_params = list(self.policy.actor_parameters())

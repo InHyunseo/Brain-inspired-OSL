@@ -72,7 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wall-penalty", type=float, default=-2.0,
                    help="Terminal penalty on wall contact.")
 
-    # Connectome (shared)
+    # Backbone / Connectome (shared)
+    p.add_argument("--backbone", choices=["connectome", "gru"], default="connectome",
+                   help="Actor backbone. 'gru' ignores the connectome CSVs.")
+    p.add_argument("--gru-hidden", dest="gru_hidden", type=int, default=421,
+                   help="GRU hidden size (used when --backbone=gru).")
     p.add_argument("--weights-csv", dest="weights_csv",
                    default="assets/connectome/weights.csv")
     p.add_argument("--metadata-csv", dest="metadata_csv",

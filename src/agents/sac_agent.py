@@ -25,6 +25,7 @@ from torch import nn
 from src.envs.osl_env import OBS_DIM, ACTION_DIM, OslEnv
 from src.envs.parallel_runner import ParallelRunner, VectorRunner
 from src.models.connectome import Connectome
+from src.models.gru_backbone import GRUBackbone
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,8 @@ class SACConfig:
     # Replay buffer
     buffer_capacity: int = 200_000     # total transitions across envs
     # Model
+    backbone: str = "connectome"       # "connectome" | "gru"
+    gru_hidden: int = 421              # GRU hidden (≈ connectome's 423-node state, for scale parity)
     latent_dim: int = 32
     message_passing_steps: int = 6
     weights_csv: str = "assets/connectome/weights.csv"
@@ -122,24 +125,35 @@ class SACPolicy(nn.Module):
 
     def __init__(
         self,
-        weights_csv: str | Path,
-        metadata_csv: str | Path,
+        weights_csv: str | Path | None = None,
+        metadata_csv: str | Path | None = None,
         latent_dim: int = 32,
         message_passing_steps: int = 6,
         critic_hidden: tuple[int, ...] = (128, 128),
         log_std_init: float = -0.5,
         log_std_min: float = -5.0,
         log_std_max: float = 2.0,
+        backbone: str = "connectome",
+        gru_hidden: int = 421,
     ):
         super().__init__()
-        self.connectome = Connectome(
-            weights_csv=weights_csv,
-            metadata_csv=metadata_csv,
-            latent_dim=latent_dim,
-            message_passing_steps=message_passing_steps,
-            activation="tanh",
-        )
-        head_in_dim = latent_dim + len(EFFERENCE_INDICES)
+        self.backbone_kind = str(backbone)
+        if self.backbone_kind == "connectome":
+            if weights_csv is None or metadata_csv is None:
+                raise ValueError("connectome backbone requires weights_csv and metadata_csv")
+            self.backbone = Connectome(
+                weights_csv=weights_csv,
+                metadata_csv=metadata_csv,
+                latent_dim=latent_dim,
+                message_passing_steps=message_passing_steps,
+                activation="tanh",
+            )
+            head_in_dim = self.backbone.latent_dim + len(EFFERENCE_INDICES)
+        elif self.backbone_kind == "gru":
+            self.backbone = GRUBackbone(input_size=OBS_DIM, hidden=gru_hidden)
+            head_in_dim = self.backbone.latent_dim
+        else:
+            raise ValueError(f"Unknown backbone {backbone!r}; expected 'connectome' or 'gru'")
         self.actor_mean = nn.Linear(head_in_dim, ACTION_DIM)
         self.actor_log_std = nn.Linear(head_in_dim, ACTION_DIM)
         # Bias the log_std head toward `log_std_init` at init.
@@ -159,10 +173,25 @@ class SACPolicy(nn.Module):
         for p in self.q2_target.parameters():
             p.requires_grad_(False)
 
-        self.actor_state_size = self.connectome.state_size
+        self.actor_state_size = self.backbone.state_size
+
+    @property
+    def group_indices(self) -> dict[str, list[int]]:
+        return self.backbone.group_indices
+
+    def _backbone_input(self, obs: torch.Tensor) -> torch.Tensor:
+        if self.backbone_kind == "connectome":
+            return _gather(obs, SENSOR_INDICES)
+        return obs
+
+    def _head_input(self, latent: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
+        if self.backbone_kind == "connectome":
+            efference = _gather(obs, EFFERENCE_INDICES)
+            return torch.cat([latent, efference], dim=-1)
+        return latent
 
     def actor_parameters(self) -> Iterable[nn.Parameter]:
-        yield from self.connectome.parameters()
+        yield from self.backbone.parameters()
         yield from self.actor_mean.parameters()
         yield from self.actor_log_std.parameters()
 
@@ -171,17 +200,21 @@ class SACPolicy(nn.Module):
         yield from self.q2.parameters()
 
     def initial_states(self, batch_size: int, device: torch.device):
-        actor_state = self.connectome.initial_state(batch_size, device)
+        actor_state = self.backbone.initial_state(batch_size, device)
         critic_state = torch.zeros(batch_size, 0, device=device)
         return actor_state, critic_state
 
     def _actor_forward(
-        self, obs: torch.Tensor, actor_state: torch.Tensor, mask: torch.Tensor
+        self,
+        obs: torch.Tensor,
+        actor_state: torch.Tensor,
+        mask: torch.Tensor,
+        patch: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        sensor = _gather(obs, SENSOR_INDICES)
-        efference = _gather(obs, EFFERENCE_INDICES)
-        latent, next_actor_state = self.connectome.forward_step(sensor, actor_state, mask)
-        head_in = torch.cat([latent, efference], dim=-1)
+        latent, next_actor_state = self.backbone.forward_step(
+            self._backbone_input(obs), actor_state, mask, patch=patch
+        )
+        head_in = self._head_input(latent, obs)
         mean = self.actor_mean(head_in)
         log_std = self.actor_log_std(head_in).clamp(self.log_std_min, self.log_std_max)
         return mean, log_std, next_actor_state
@@ -214,12 +247,13 @@ class SACPolicy(nn.Module):
         critic_state: torch.Tensor,
         mask: torch.Tensor,
         deterministic: bool = False,
+        patch: dict[str, Any] | None = None,
     ):
         """Single-step action for env interaction.
 
         Returns (action, log_prob, next_actor_state, next_critic_state) — same
         signature shape the PPO eval cell expects (ignoring the value channel)."""
-        mean, log_std, next_actor_state = self._actor_forward(obs, actor_state, mask)
+        mean, log_std, next_actor_state = self._actor_forward(obs, actor_state, mask, patch=patch)
         action, log_prob = self._sample_action(mean, log_std, deterministic)
         return action, log_prob, next_actor_state, critic_state
 
@@ -373,6 +407,8 @@ class SACTrainer:
             log_std_init=cfg.log_std_init,
             log_std_min=cfg.log_std_min,
             log_std_max=cfg.log_std_max,
+            backbone=cfg.backbone,
+            gru_hidden=cfg.gru_hidden,
         ).to(self.device)
 
         self.actor_params = list(self.policy.actor_parameters())

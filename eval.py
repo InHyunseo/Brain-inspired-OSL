@@ -11,6 +11,7 @@ import os
 import numpy as np
 import torch
 
+from src.models.policy import remap_legacy_backbone_keys
 from src.utils.config import build_parser
 from src.utils.factory import make_env
 from src.utils.plotter import render_rollout_frame, save_gif
@@ -81,8 +82,10 @@ def eval_ppo(args, run_dir):
         latent_dim=cfg.latent_dim,
         message_passing_steps=cfg.message_passing_steps,
         log_std_init=cfg.log_std_init,
+        backbone=cfg.backbone,
+        gru_hidden=cfg.gru_hidden,
     ).to(device)
-    policy.load_state_dict(payload["policy_state_dict"])
+    policy.load_state_dict(remap_legacy_backbone_keys(payload["policy_state_dict"]))
     policy.eval()
 
     env = _build_eval_env(args)
@@ -188,8 +191,10 @@ def eval_sac(args, run_dir):
         log_std_init=cfg.log_std_init,
         log_std_min=cfg.log_std_min,
         log_std_max=cfg.log_std_max,
+        backbone=cfg.backbone,
+        gru_hidden=cfg.gru_hidden,
     ).to(device)
-    policy.load_state_dict(payload["policy_state_dict"])
+    policy.load_state_dict(remap_legacy_backbone_keys(payload["policy_state_dict"]))
     policy.eval()
 
     env = _build_eval_env(args)

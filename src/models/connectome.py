@@ -17,6 +17,34 @@ import torch
 from torch import nn
 
 
+def _apply_patch(state: torch.Tensor, patch: dict[str, Any] | None) -> torch.Tensor:
+    """Overwrite hidden-state units at `patch['indices']` for ablation analysis.
+
+    `patch = {"indices": <list/array/tensor>, "value": "zero"|"mean"|"flip"|float}`.
+    Returns a new tensor; the input is left unmodified (autograd-safe). Mirrors
+    osl_analysis `policy_adapter._apply_patch`.
+    """
+    if patch is None:
+        return state
+    indices = patch.get("indices")
+    if indices is None:
+        return state
+    idx = torch.as_tensor(indices, dtype=torch.long, device=state.device)
+    if idx.numel() == 0:
+        return state
+    out = state.clone()
+    value = patch.get("value", "zero")
+    if value == "zero":
+        out[:, idx] = 0.0
+    elif value == "mean":
+        out[:, idx] = state[:, idx].mean()
+    elif value == "flip":
+        out[:, idx] = -state[:, idx]
+    else:
+        out[:, idx] = float(value)
+    return out
+
+
 def _activation(name: str) -> nn.Module:
     key = name.lower()
     if key == "relu":
@@ -39,10 +67,31 @@ class ConnectomeLayout:
     left_orn_indices: list[int]
     right_orn_indices: list[int]
     mbon_indices: list[int]
+    celltype_indices: dict[str, list[int]] | None = None
 
     @property
     def total_node_count(self) -> int:
         return self.base_node_count + 2 + len(self.output_indices)
+
+    def analysis_group_indices(self) -> dict[str, list[int]]:
+        """Cell-type partition of the augmented node activation `(total_node_count,)`.
+
+        Keys mirror osl_analysis `neuron_groups.py` connectome convention so the
+        analysis pipeline can group hidden units by biological cell type. Returns
+        node *indices into the full augmented state vector* (base + 2 sensors +
+        latent output nodes), not just base nodes.
+        """
+        groups: dict[str, list[int]] = {"all": list(range(self.total_node_count))}
+        groups["left_orn"] = list(self.left_orn_indices)
+        groups["right_orn"] = list(self.right_orn_indices)
+        groups["orn"] = sorted(set(self.left_orn_indices) | set(self.right_orn_indices))
+        groups["mbon"] = list(self.mbon_indices)
+        groups["sensor_input"] = [self.left_sensor_index, self.right_sensor_index]
+        groups["latent_output"] = list(self.output_indices)
+        if self.celltype_indices:
+            for name, idx in self.celltype_indices.items():
+                groups[f"celltype_{name}"] = list(idx)
+        return groups
 
 
 def load_connectome_layout(
@@ -68,6 +117,12 @@ def load_connectome_layout(
     right_orn = [i for i, r in enumerate(rows) if r.get("is_right_orn", "0") in truthy]
     mbon = [i for i, r in enumerate(rows) if r.get("is_mbon", "0") in truthy]
 
+    celltype_indices: dict[str, list[int]] = {}
+    for i, r in enumerate(rows):
+        ct = (r.get("celltype") or "").strip()
+        if ct:
+            celltype_indices.setdefault(ct, []).append(i)
+
     base = weights.shape[0]
     output_indices = tuple(base + 2 + i for i in range(latent_dim))
     layout = ConnectomeLayout(
@@ -78,6 +133,7 @@ def load_connectome_layout(
         left_orn_indices=left_orn,
         right_orn_indices=right_orn,
         mbon_indices=mbon,
+        celltype_indices=celltype_indices or None,
     )
     return (weights > 0).astype(np.float32), layout
 
@@ -150,8 +206,17 @@ class Connectome(nn.Module):
         agg.index_add_(1, self.edge_targets, messages)
         return agg
 
+    @property
+    def group_indices(self) -> dict[str, list[int]]:
+        """Cell-type partition of the hidden state for analysis (see layout)."""
+        return self.layout.analysis_group_indices()
+
     def forward_step(
-        self, sensor_obs: torch.Tensor, state: torch.Tensor, mask: torch.Tensor
+        self,
+        sensor_obs: torch.Tensor,
+        state: torch.Tensor,
+        mask: torch.Tensor,
+        patch: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         current = state * mask
         for _ in range(self.message_passing_steps):
@@ -159,6 +224,7 @@ class Connectome(nn.Module):
             pre = self._aggregate(current) + self.bias
             current = self.state_activation(pre)
             current = self._inject_sensors(current, sensor_obs)
+        current = _apply_patch(current, patch)
         latent = current[:, list(self.layout.output_indices)]
         return latent, current
 
@@ -167,13 +233,14 @@ class Connectome(nn.Module):
         sensor_obs_seq: torch.Tensor,
         state0: torch.Tensor,
         mask_seq: torch.Tensor,
+        patch: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if sensor_obs_seq.ndim != 3:
             raise ValueError(f"Expected sensor_obs_seq shape [T, B, 2], got {tuple(sensor_obs_seq.shape)}")
         state = state0
         outs = []
         for step in range(sensor_obs_seq.shape[0]):
-            latent, state = self.forward_step(sensor_obs_seq[step], state, mask_seq[step])
+            latent, state = self.forward_step(sensor_obs_seq[step], state, mask_seq[step], patch=patch)
             outs.append(latent)
         return torch.stack(outs, dim=0), state
 
