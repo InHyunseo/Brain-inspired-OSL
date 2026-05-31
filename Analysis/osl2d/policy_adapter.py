@@ -129,5 +129,40 @@ class Policy2DAdapter:
             action = mean.clamp(-1.0, 1.0)
         return action.squeeze(0).cpu().numpy(), h_next.squeeze(0).cpu().numpy()
 
+    @torch.no_grad()
+    def step_stochastic(
+        self,
+        obs_np: np.ndarray,
+        h_flat_np: np.ndarray,
+        patch=None,
+        generator: torch.Generator | None = None,
+    ):
+        """Stochastic single step — samples from the policy's action distribution.
+
+        Mirrors how the agent actually acts at training time:
+          - SAC: reparameterized squashed-Gaussian, ``tanh(mean + sigma * eps)``.
+            The squash must wrap ``mean + sigma*eps`` (NOT ``tanh(mean) + ...``),
+            matching ``SACPolicy`` sampling.
+          - PPO: ``Normal(mean, sigma).sample()`` then clamp to the action box.
+
+        The hidden-state update is identical to the deterministic path (the
+        backbone is driven by ``obs``, not by the sampled action), so the
+        returned ``h_next`` is consistent with ``step_patched``. Uses ``mean``
+        for the recurrent rollout via the same forward; only the *emitted*
+        action is stochastic.
+
+        Returns ``(action_np (A,), h_next_flat_np (H,))``.
+        """
+        obs = torch.from_numpy(np.asarray(obs_np, dtype=np.float32)).to(self.device).unsqueeze(0)
+        h = torch.from_numpy(np.asarray(h_flat_np, dtype=np.float32)).to(self.device).unsqueeze(0)
+        mean, log_std, h_next = self._mean_logstd(obs, h, patch=patch)
+        std = log_std.exp()
+        eps = torch.randn(mean.shape, generator=generator, device=mean.device, dtype=mean.dtype)
+        if self.agent_type == "sac":
+            action = torch.tanh(mean + std * eps)
+        else:
+            action = (mean + std * eps).clamp(-1.0, 1.0)
+        return action.squeeze(0).cpu().numpy(), h_next.squeeze(0).cpu().numpy()
+
     def initial_state(self) -> np.ndarray:
         return np.zeros(self.state_size, dtype=np.float32)

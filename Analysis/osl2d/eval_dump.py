@@ -55,16 +55,27 @@ def _env_config_from_ckpt(ckpt_path: Path, noise_stage: int, noise_strength: flo
     return EnvConfig.from_dict(env_cfg)
 
 
-def rollout(adapter: Policy2DAdapter, env: OslEnv, seed: int, max_steps: int | None):
+def rollout(adapter: Policy2DAdapter, env: OslEnv, seed: int, max_steps: int | None,
+            stochastic: bool = False):
     obs, _ = env.reset(seed=seed)
     h = adapter.initial_state()
     T_cap = max_steps if max_steps is not None else 10_000
+
+    # Per-episode torch generator so stochastic rollouts are reproducible and
+    # decoupled from the env RNG (seed offset keeps it distinct from env seed).
+    gen = None
+    if stochastic:
+        gen = torch.Generator(device=adapter.device)
+        gen.manual_seed(int(seed) + 777)
 
     obs_buf, h_buf, act_buf, rew_buf = [], [], [], []
     kin_buf, ev_buf = [], []
     success = 0
     for _ in range(T_cap):
-        action, h_next = adapter.step_patched(obs, h, patch=None)
+        if stochastic:
+            action, h_next = adapter.step_stochastic(obs, h, patch=None, generator=gen)
+        else:
+            action, h_next = adapter.step_patched(obs, h, patch=None)
         next_obs, reward, term, trunc, info = env.step(action)
 
         obs_buf.append(np.asarray(obs, dtype=np.float32))
@@ -115,13 +126,18 @@ def collect(
     noise_stage: int = 2,
     noise_strength: float = 1.0,
     device: str | None = None,
+    stochastic: bool = False,
 ) -> Path:
     run_dir = Path(run_dir)
     ckpt_path = _resolve_ckpt(run_dir, ckpt_label)
     adapter = Policy2DAdapter.from_checkpoint(ckpt_path, device=device)
     env_cfg = _env_config_from_ckpt(ckpt_path, noise_stage, noise_strength)
 
-    out_dir = run_dir / "analysis" / "traces" / ckpt_label
+    # Stochastic traces go to their own ``{label}__stoch`` trace dir so they are
+    # never mixed into the deterministic Jacobian/fixed-point/ablation analyses
+    # (those require a deterministic map). Use them for Phase 1 behavior stats.
+    trace_label = f"{ckpt_label}__stoch" if stochastic else ckpt_label
+    out_dir = run_dir / "analysis" / "traces" / trace_label
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Group metadata (cell-type / third partition) once per ckpt.
@@ -136,16 +152,17 @@ def collect(
         env = OslEnv(env_cfg)
         for e in range(episodes_per_seed):
             ep_seed = 10_000 + int(s) * 1000 + e
-            traj = rollout(adapter, env, ep_seed, max_steps)
+            traj = rollout(adapter, env, ep_seed, max_steps, stochastic=stochastic)
             episode_id = int(s) * 10_000 + e
             out = out_dir / f"eval_seed{s}_ep{e:03d}.npz"
             np.savez_compressed(
                 out, **traj, episode=e, seed=int(s), episode_id=episode_id,
-                ckpt_label=ckpt_label,
+                ckpt_label=trace_label,
+                action_mode=("stochastic" if stochastic else "deterministic"),
             )
             n_saved += 1
             ret = float(traj["reward"].sum())
-            print(f"[dump] ckpt={ckpt_label} seed={s} ep={e:03d} "
+            print(f"[dump] ckpt={trace_label} seed={s} ep={e:03d} "
                   f"T={len(traj['reward']):4d} return={ret:8.2f} success={int(traj['success'])}")
     print(f"[dump] saved {n_saved} episodes → {out_dir}")
     return out_dir
@@ -161,6 +178,10 @@ def main(argv=None):
     p.add_argument("--noise-stage", type=int, default=2)
     p.add_argument("--noise-strength", type=float, default=1.0)
     p.add_argument("--device", default=None)
+    p.add_argument("--stochastic", action="store_true",
+                   help="Sample actions from the policy distribution instead of "
+                        "the deterministic mean. Traces go to a '{label}__stoch' "
+                        "dir — use for Phase 1 behavior stats, not Phase 2-4.")
     args = p.parse_args(argv)
 
     for cl in args.checkpoints:
@@ -173,6 +194,7 @@ def main(argv=None):
             noise_stage=args.noise_stage,
             noise_strength=args.noise_strength,
             device=args.device,
+            stochastic=args.stochastic,
         )
 
 

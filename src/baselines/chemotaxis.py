@@ -43,13 +43,25 @@ class ChemotaxisConfig:
     ewma_alpha: float = 0.3
     # If smoothed c_avg drops below this fraction of the running max → "weak".
     weak_frac: float = 0.35
+    # Deadband on the rising/falling test: only count the signal as "falling"
+    # when the smoothed c_avg drops by more than this fraction of the running
+    # max between steps. Without it, turbulent plumes flicker c_avg down by a
+    # hair almost every step, so `not rising` fires constantly and the agent
+    # casts far more than it should (and stalls, hurting success). 0.05 ignores
+    # sub-5%-of-peak jitter; empirically this drops cast-fraction to ~0-6% and
+    # *raises* success under turbulence (the agent surges through instead of
+    # casting on noise).
+    rising_deadband_frac: float = 0.05
     # Steps of weak/declining signal before entering cast (head-sweep) mode.
     cast_after_weak_steps: int = 4
     # Head sweep amplitude (action[2]) and half-period (steps) while casting.
     cast_head_omega: float = 1.0
     cast_half_period: int = 6
-    # Small forward creep while casting so we don't stall in place.
-    cast_creep_speed: float = 0.15
+    # Small forward creep while casting so we don't stall in place. MUST stay
+    # below stop_threshold_mm_s / v_max (=0.08/1.2≈0.067) or the env never sets
+    # is_stop and the head sweep is NOT labeled as a cast (event_is_*_cast/sweep
+    # require is_stop). 0.05 → 0.06 mm/s < 0.08 keeps casts countable.
+    cast_creep_speed: float = 0.05
     # Body turn while casting (slow scan rotation), sign flips with the sweep.
     cast_body_omega: float = 0.25
 
@@ -85,7 +97,10 @@ class BilateralChemotaxis:
         self._prev_ewma = self._ewma
         self._ewma = (1.0 - cfg.ewma_alpha) * self._ewma + cfg.ewma_alpha * c_avg
         self._cmax = max(self._cmax, self._ewma)
-        rising = self._ewma >= self._prev_ewma
+        # Deadband: treat as "falling" only on a drop larger than a small
+        # fraction of the best signal, so plume jitter doesn't read as a loss.
+        drop = self._prev_ewma - self._ewma
+        rising = drop <= cfg.rising_deadband_frac * self._cmax
 
         # Normalized bilateral asymmetry in [-1, 1]: +1 → left much stronger.
         denom = c_left + c_right + 1e-9
