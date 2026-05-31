@@ -86,10 +86,16 @@ class EnvConfig:
     # energetically expensive emergent behaviour for the larva.
     reward_run_cost: float = -0.01      # coefficient on (v_norm)^2
     reward_body_turn_cost: float = -0.005   # coefficient on (body_omega_norm)^2
-    reward_head_cast_cost: float = -0.02    # coefficient on (head_omega_norm)^2
-    # Extra penalty if the agent is stopped *and* shaking its head — emergent
-    # "cast" behaviour is allowed but should still cost more than running.
-    reward_head_cast_stopped_mult: float = 2.0
+    # head_omega cost lowered to run-cost level (was -0.02). With sensors at the
+    # head tip (sensor_forward_mm) a cast yields real gradient info (dlog reward
+    # ~+0.035/step when it finds the warmer side), so the cost must not exceed
+    # that or the policy never explores casting. -0.01 keeps cast a net positive
+    # when it actually informs the next surge.
+    reward_head_cast_cost: float = -0.01    # coefficient on (head_omega_norm)^2
+    # Multiplier for stopped head-shaking (cast). Set to 1.0 (was 2.0): the old
+    # 2× made stopped casting cost -0.04/step, larger than its information gain,
+    # which blocked the policy from ever discovering cast during exploration.
+    reward_head_cast_stopped_mult: float = 1.0
     # Spin-like behaviour penalty (head sweep > 120° or stopped > 2 s).
     reward_spin_penalty: float = -0.05
     max_sampling_duration_s: float = 2.0
