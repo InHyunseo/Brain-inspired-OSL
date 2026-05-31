@@ -514,6 +514,7 @@ class SACTrainer:
             f"| ret {payload['recent_return_mean']:.3f} "
             f"| len {payload['recent_episode_length_mean']:.1f} "
             f"| success {payload['recent_success_rate'] * 100.0:.1f}% "
+            f"| dist {payload.get('eval_final_distance_mean', float('nan')):.1f}mm "
             f"| casts {payload.get('recent_cast_mean', 0.0):.1f} "
             f"| actor {payload['actor_loss']:.4f} "
             f"| critic {payload['critic_loss']:.4f} "
@@ -530,7 +531,7 @@ class SACTrainer:
 
     def _evaluate(self, episodes: int) -> dict[str, float]:
         env = OslEnv({**self.env_config, "seed": self.cfg.seed + 10_000})
-        returns, successes = [], []
+        returns, successes, final_dists = [], [], []
         for episode_idx in range(episodes):
             obs, _ = env.reset(seed=self.cfg.seed + 10_000 + episode_idx)
             actor_state, critic_state = self.policy.initial_states(1, self.device)
@@ -538,6 +539,7 @@ class SACTrainer:
             ep_return = 0.0
             done = False
             success = False
+            final_dist = float("nan")
             while not done:
                 obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
                 with torch.no_grad():
@@ -549,16 +551,20 @@ class SACTrainer:
                 done = bool(terminated or truncated)
                 if done:
                     success = bool(info.get("success", False))
+                    # Distance between the final agent position and the source.
+                    final_dist = float(info.get("distance_to_source_mm", float("nan")))
                 mask.fill_(0.0 if done else 1.0)
                 actor_state = next_actor_state * mask
                 critic_state = next_critic_state * mask
             returns.append(ep_return)
             successes.append(1.0 if success else 0.0)
+            final_dists.append(final_dist)
         env.close()
         return {
             "eval_return_mean": float(np.mean(returns)) if returns else 0.0,
             "eval_return_std": float(np.std(returns)) if returns else 0.0,
             "eval_success_rate": float(np.mean(successes)) if successes else 0.0,
+            "eval_final_distance_mean": float(np.nanmean(final_dists)) if final_dists else float("nan"),
         }
 
     # ---- SAC update -----------------------------------------------------
@@ -725,7 +731,11 @@ class SACTrainer:
             self._update_count += 1
 
             if self._update_count % self.cfg.eval_interval_updates == 0:
-                latest_metrics.update(self._evaluate(self.cfg.eval_episodes))
+                eval_metrics = self._evaluate(self.cfg.eval_episodes)
+                latest_metrics.update(eval_metrics)
+                # Cache eval-only metrics so every log line can show the most
+                # recent value (eval runs only every eval_interval_updates).
+                self._last_eval_metrics = eval_metrics
 
             log_payload = {
                 "total_steps": int(self._total_steps),
@@ -735,6 +745,7 @@ class SACTrainer:
                 "recent_episode_length_mean": float(np.mean(self._recent_lengths)) if self._recent_lengths else 0.0,
                 "recent_success_rate": float(np.mean(self._recent_successes)) if self._recent_successes else 0.0,
                 "recent_cast_mean": float(np.mean(self._recent_casts)) if self._recent_casts else 0.0,
+                **getattr(self, "_last_eval_metrics", {}),
                 **latest_metrics,
             }
             if self._update_count % max(1, self.cfg.log_every_updates) == 0:
