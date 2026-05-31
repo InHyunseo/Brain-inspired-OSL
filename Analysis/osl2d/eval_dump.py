@@ -79,7 +79,10 @@ def rollout(adapter: Policy2DAdapter, env: OslEnv, seed: int, max_steps: int | N
         next_obs, reward, term, trunc, info = env.step(action)
 
         obs_buf.append(np.asarray(obs, dtype=np.float32))
-        h_buf.append(np.asarray(h, dtype=np.float32))
+        # Store the neuron-pooled hidden (D channels -> 1 scalar/node via L2) so
+        # downstream phases analyse N neurons, not N*D flat slots. The live `h`
+        # carried into the next step stays full-dim (pooling is save-only).
+        h_buf.append(adapter.pool_hidden(np.asarray(h, dtype=np.float32)))
         act_buf.append(np.asarray(action, dtype=np.float32))
         rew_buf.append(float(reward))
         kin_buf.append([
@@ -140,9 +143,12 @@ def collect(
     out_dir = run_dir / "analysis" / "traces" / trace_label
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Group metadata (cell-type / third partition) once per ckpt.
-    gi = {k: [int(i) for i in v] for k, v in adapter.group_indices.items()}
-    gi["state_size"] = adapter.state_size
+    # Group metadata (cell-type / third partition) once per ckpt. Use node-space
+    # indices and pooled state size so they line up with the pooled hidden traces
+    # (one scalar per neuron). For GRU / feature_dim==1 these equal the raw ones.
+    gi = {k: [int(i) for i in v] for k, v in adapter.node_group_indices.items()}
+    gi["state_size"] = int(adapter.n_nodes if adapter.feature_dim > 1 else adapter.state_size)
+    gi["feature_dim"] = int(adapter.feature_dim)
     gi["backbone"] = adapter.backbone_kind
     with (out_dir / "group_indices.json").open("w") as f:
         json.dump(gi, f, indent=2)

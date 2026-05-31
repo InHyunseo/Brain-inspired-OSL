@@ -78,6 +78,44 @@ class Policy2DAdapter:
         self.action_dim = ACTION_DIM
         self.state_size = int(policy.actor_state_size)
         self.backbone_kind = getattr(policy, "backbone_kind", "connectome")
+        # D-dim connectome: each node carries `feature_dim` channels, so the raw
+        # hidden state is (N*D,). For neuron-level analysis we pool the D channels
+        # back to one scalar per node via L2 norm. feature_dim==1 (or GRU) => no-op.
+        backbone = getattr(policy, "backbone", None)
+        self.feature_dim = int(getattr(backbone, "feature_dim", 1) or 1)
+        self.n_nodes = int(getattr(backbone, "n_total", self.state_size))
+
+    def pool_hidden(self, h: np.ndarray) -> np.ndarray:
+        """Reduce a raw hidden state/sequence to one scalar per neuron.
+
+        `h` is (..., N*D); returns (..., N) by L2 norm over each node's D
+        channels. For feature_dim==1 this is identity (up to abs value), which is
+        fine — analysis only ever used |activation| anyway. GRU backbones (no
+        feature_dim) pass through unchanged.
+        """
+        if self.feature_dim <= 1:
+            return h
+        h = np.asarray(h, dtype=np.float32)
+        lead = h.shape[:-1]
+        hr = h.reshape(*lead, self.n_nodes, self.feature_dim)
+        return np.linalg.norm(hr, axis=-1)
+
+    @property
+    def node_group_indices(self) -> dict[str, list[int]]:
+        """Group indices in *node* space (post-pool), for neuron-level analysis.
+
+        The policy's `group_indices` are in flattened N*D slot space (so live
+        ablation can zero whole nodes). After pooling, traces live in node space,
+        so divide every slot index by feature_dim and dedup back to node ids.
+        """
+        if self.feature_dim <= 1:
+            return self.policy.group_indices
+        D = self.feature_dim
+        out: dict[str, list[int]] = {}
+        for name, slots in self.policy.group_indices.items():
+            nodes = sorted({int(i) // D for i in slots})
+            out[name] = nodes
+        return out
 
     @classmethod
     def from_checkpoint(cls, ckpt_path: str | Path, device: str | torch.device | None = None):
