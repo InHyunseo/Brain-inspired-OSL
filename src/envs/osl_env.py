@@ -111,8 +111,14 @@ class EnvConfig:
         return cls(**{k: v for k, v in payload.items() if k in valid})
 
 
-# Observation: [c_left, c_right, prev_v_norm, prev_body_omega_norm, prev_head_omega_norm]
-OBS_DIM = 5
+# Observation: [c_left, c_right, dlog, prev_v_norm, prev_body_omega_norm, prev_head_omega_norm]
+# dlog = clipped rate-of-change of log mean concentration ("am I heading up-gradient?").
+# Added because the instantaneous left/right difference is ~0.2% (sensor spacing
+# 0.15mm << plume sigma 30mm), too weak for the policy to learn a heading from;
+# exposing the temporal gradient directly is the biologically-plausible fix
+# (larva neurons compute concentration change over time) that keeps the sensor
+# physics untouched.
+OBS_DIM = 6
 # Action: [v, body_omega, head_omega] in [-1, 1]
 ACTION_DIM = 3
 
@@ -230,10 +236,26 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         if len(self.prev_logs) > 4:
             self.prev_logs.pop(0)
 
+        # Temporal log-concentration gradient (same formula as the reward_dlog
+        # shaping term). Gives the policy an explicit "warmer / colder" heading
+        # cue that the weak instantaneous left/right difference cannot. Clipped
+        # to ±reward_log_clip for the same near-c=0 stability reason; 0 on the
+        # first step of an episode (no previous reading yet).
+        if len(self.prev_logs) >= 2:
+            prev_avg = self.prev_logs[-2]["avg"]
+            dlog = (math.log(readings["avg"] + self.cfg.epsilon)
+                    - math.log(prev_avg + self.cfg.epsilon)) / self.cfg.dt
+        else:
+            dlog = 0.0
+        clip = float(self.cfg.reward_log_clip)
+        if clip > 0.0:
+            dlog = max(-clip, min(clip, dlog))
+
         obs = np.asarray(
             [
                 readings["left"],
                 readings["right"],
+                dlog,
                 self.prev_action[0],
                 self.prev_action[1],
                 self.prev_action[2],
