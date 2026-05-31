@@ -20,7 +20,7 @@ from torch.distributions import Normal
 
 from src.envs.osl_env import ACTION_DIM
 from src.models.connectome import Connectome
-from src.models.policy import EFFERENCE_INDICES, SENSOR_INDICES, _gather
+from src.models.policy import HEAD_EXTRA_INDICES, SENSOR_INDICES, _gather
 
 
 def _gaussian_sample(mu, log_std, action_low, action_high):
@@ -111,9 +111,9 @@ class MLPActor(nn.Module):
 class ConnectomeActor(nn.Module):
     """RSAC actor wrapping the larva `Connectome` branch.
 
-    Sensor channels (`obs[:, 0:2]`) feed the connectome; efference-copy channels
-    (`obs[:, 2:5]`) are concatenated with the latent before the Gaussian head.
-    Hidden state `h` is the connectome's `(B, state_size)` activation.
+    Sensor channels (`obs[:, 0:2]`) feed the connectome; the dlog + efference-copy
+    channels (`obs[:, 2:6]`) are concatenated with the latent before the Gaussian
+    head. Hidden state `h` is the connectome's `(B, state_size)` activation.
     """
 
     def __init__(
@@ -133,7 +133,7 @@ class ConnectomeActor(nn.Module):
             message_passing_steps=message_passing_steps,
             activation="tanh",
         )
-        head_in = latent_dim + len(EFFERENCE_INDICES)
+        head_in = latent_dim + len(HEAD_EXTRA_INDICES)
         self.head = _GaussianHead(head_in, act_dim)
         self.state_size = self.connectome.state_size
 
@@ -146,12 +146,12 @@ class ConnectomeActor(nn.Module):
             if h is None:
                 h = self.connectome.initial_state(bsz, obs.device)
             sensor_seq = _gather(obs, SENSOR_INDICES).transpose(0, 1)       # (T, B, 2)
-            efference_seq = _gather(obs, EFFERENCE_INDICES)                  # (B, T, E)
+            head_extra_seq = _gather(obs, HEAD_EXTRA_INDICES)                # (B, T, E)
             mask_seq = torch.ones(sensor_seq.shape[0], bsz, 1,
                                   device=obs.device, dtype=obs.dtype)
             latent_seq, h2 = self.connectome.forward_sequence(sensor_seq, h, mask_seq)
             latent = latent_seq.transpose(0, 1)                              # (B, T, K)
-            head_in = torch.cat([latent, efference_seq], dim=-1)
+            head_in = torch.cat([latent, head_extra_seq], dim=-1)
             mu, log_std = self.head(head_in)
             return mu, log_std, h2
 
@@ -159,9 +159,9 @@ class ConnectomeActor(nn.Module):
             h = self.connectome.initial_state(obs.shape[0], obs.device)
         mask = torch.ones(obs.shape[0], 1, device=obs.device, dtype=obs.dtype)
         sensor = _gather(obs, SENSOR_INDICES)
-        efference = _gather(obs, EFFERENCE_INDICES)
+        head_extra = _gather(obs, HEAD_EXTRA_INDICES)
         latent, h2 = self.connectome.forward_step(sensor, h, mask)
-        head_in = torch.cat([latent, efference], dim=-1)
+        head_in = torch.cat([latent, head_extra], dim=-1)
         mu, log_std = self.head(head_in)
         return mu, log_std, h2
 

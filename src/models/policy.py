@@ -3,12 +3,12 @@
 Actor backbone is selectable via `backbone=`:
 
 - ``"connectome"`` — `Connectome` consumes sensor channels (obs[:, 0:2]); its
-  latent is concatenated with efference-copy channels (obs[:, 2:5]) before a
-  Linear head emits the Gaussian mean.
-- ``"gru"`` — `GRUBackbone` consumes the full 5-D obs; its hidden state is the
-  latent and the head consumes it directly (no efference re-concat).
+  latent is concatenated with the dlog + efference-copy channels (obs[:, 2:6])
+  before a Linear head emits the Gaussian mean.
+- ``"gru"`` — `GRUBackbone` consumes the full 6-D obs; its hidden state is the
+  latent and the head consumes it directly (no re-concat).
 
-Critic: stateless MLP over the full 5-D obs producing a scalar value.
+Critic: stateless MLP over the full 6-D obs producing a scalar value.
 
 Sequence operations follow the convention: tensors are `(T, B, D)` for both
 `obs_seq` and `mask_seq`; states are `(B, state_size)` carried across env steps
@@ -29,7 +29,12 @@ from src.models.gru_backbone import GRUBackbone
 
 
 SENSOR_INDICES = (0, 1)
-EFFERENCE_INDICES = (2, 3, 4)
+# dlog (idx 2) + efference copy v/body_omega/head_omega (idx 3,4,5). dlog is a
+# temporal-gradient cue and the efference channels let the head interpret its
+# own cast (head_omega) when reading dlog. Re-concatenated onto the connectome
+# latent before the actor head; the sensor-only connectome backbone never sees
+# these directly.
+HEAD_EXTRA_INDICES = (2, 3, 4, 5)
 
 
 def _gather(obs: torch.Tensor, indices: tuple[int, ...]) -> torch.Tensor:
@@ -75,7 +80,7 @@ class Policy(nn.Module):
                 message_passing_steps=message_passing_steps,
                 activation="tanh",
             )
-            head_in_dim = self.backbone.latent_dim + len(EFFERENCE_INDICES)
+            head_in_dim = self.backbone.latent_dim + len(HEAD_EXTRA_INDICES)
         elif self.backbone_kind == "gru":
             self.backbone = GRUBackbone(input_size=OBS_DIM, hidden=gru_hidden)
             head_in_dim = self.backbone.latent_dim
@@ -110,8 +115,8 @@ class Policy(nn.Module):
     def _head_input(self, latent: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
         """Compose the actor-head input from the backbone latent."""
         if self.backbone_kind == "connectome":
-            efference = _gather(obs, EFFERENCE_INDICES)
-            return torch.cat([latent, efference], dim=-1)
+            head_extra = _gather(obs, HEAD_EXTRA_INDICES)
+            return torch.cat([latent, head_extra], dim=-1)
         return latent
 
     def actor_parameters(self) -> Iterable[nn.Parameter]:

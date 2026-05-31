@@ -92,7 +92,10 @@ class SACConfig:
 
 
 SENSOR_INDICES = (0, 1)
-EFFERENCE_INDICES = (2, 3, 4)
+# dlog (idx 2) + efference copy v/body_omega/head_omega (idx 3,4,5), re-concatenated
+# onto the sensor-only connectome latent before the actor head. Mirrors
+# policy.HEAD_EXTRA_INDICES so SAC- and PPO-connectome share the same head inputs.
+HEAD_EXTRA_INDICES = (2, 3, 4, 5)
 
 
 def _gather(obs: torch.Tensor, indices: tuple[int, ...]) -> torch.Tensor:
@@ -148,7 +151,7 @@ class SACPolicy(nn.Module):
                 message_passing_steps=message_passing_steps,
                 activation="tanh",
             )
-            head_in_dim = self.backbone.latent_dim + len(EFFERENCE_INDICES)
+            head_in_dim = self.backbone.latent_dim + len(HEAD_EXTRA_INDICES)
         elif self.backbone_kind == "gru":
             self.backbone = GRUBackbone(input_size=OBS_DIM, hidden=gru_hidden)
             head_in_dim = self.backbone.latent_dim
@@ -186,8 +189,8 @@ class SACPolicy(nn.Module):
 
     def _head_input(self, latent: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
         if self.backbone_kind == "connectome":
-            efference = _gather(obs, EFFERENCE_INDICES)
-            return torch.cat([latent, efference], dim=-1)
+            head_extra = _gather(obs, HEAD_EXTRA_INDICES)
+            return torch.cat([latent, head_extra], dim=-1)
         return latent
 
     def actor_parameters(self) -> Iterable[nn.Parameter]:
