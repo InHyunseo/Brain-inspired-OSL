@@ -493,6 +493,29 @@ class SACTrainer:
         torch.save(self._checkpoint_payload(summary), path)
         return path
 
+    def load_checkpoint(self, path: str | Path, load_optimizer: bool = True) -> int:
+        """Restore policy (incl. target Q nets), optimizers, log_alpha and step
+        counter from a checkpoint to resume. Returns the restored `total_steps`
+        so the caller can skip already-completed curriculum phases. Rolling-stat
+        deques are not restored (cosmetic recent-window logs only).
+        """
+        payload = torch.load(path, map_location=self.device, weights_only=False)
+        self.policy.load_state_dict(payload["policy_state_dict"])
+        with torch.no_grad():
+            self.log_alpha.copy_(payload["log_alpha"].to(self.device))
+        if load_optimizer:
+            self.actor_optimizer.load_state_dict(payload["actor_optimizer_state_dict"])
+            self.critic_optimizer.load_state_dict(payload["critic_optimizer_state_dict"])
+            self.alpha_optimizer.load_state_dict(payload["alpha_optimizer_state_dict"])
+        ts = payload.get("training_state", {})
+        self._total_steps = int(ts.get("total_steps", 0))
+        self._update_count = int(ts.get("updates", 0))
+        interval = max(1, self.cfg.checkpoint_every_timesteps)
+        self._next_checkpoint_step = (self._total_steps // interval + 1) * interval
+        print(f"[Resume] loaded {path} -> total_steps={self._total_steps} "
+              f"updates={self._update_count} (optimizer={'yes' if load_optimizer else 'no'})")
+        return self._total_steps
+
     def _append_log(self, payload: dict[str, Any]) -> None:
         with self.log_path.open("a", encoding="utf-8") as h:
             h.write(json.dumps(payload, ensure_ascii=True) + "\n")
