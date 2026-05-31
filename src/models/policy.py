@@ -67,6 +67,7 @@ class Policy(nn.Module):
         log_std_init: float = -0.5,
         backbone: str = "connectome",
         gru_hidden: int = 421,
+        feature_dim: int = 8,
     ):
         super().__init__()
         self.backbone_kind = str(backbone)
@@ -79,6 +80,7 @@ class Policy(nn.Module):
                 latent_dim=latent_dim,
                 message_passing_steps=message_passing_steps,
                 activation="tanh",
+                feature_dim=feature_dim,
             )
             head_in_dim = self.backbone.latent_dim + len(HEAD_EXTRA_INDICES)
         elif self.backbone_kind == "gru":

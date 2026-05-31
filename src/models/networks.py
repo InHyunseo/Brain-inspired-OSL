@@ -124,6 +124,7 @@ class ConnectomeActor(nn.Module):
         metadata_csv: str | Path = "assets/connectome/metadata.csv",
         latent_dim: int = 32,
         message_passing_steps: int = 6,
+        feature_dim: int = 8,
     ):
         super().__init__()
         self.connectome = Connectome(
@@ -132,8 +133,11 @@ class ConnectomeActor(nn.Module):
             latent_dim=latent_dim,
             message_passing_steps=message_passing_steps,
             activation="tanh",
+            feature_dim=feature_dim,
         )
-        head_in = latent_dim + len(HEAD_EXTRA_INDICES)
+        # actual latent is the D-dim output-node states flattened (n_out * D),
+        # exposed as connectome.latent_dim -- not the output-node count.
+        head_in = self.connectome.latent_dim + len(HEAD_EXTRA_INDICES)
         self.head = _GaussianHead(head_in, act_dim)
         self.state_size = self.connectome.state_size
 

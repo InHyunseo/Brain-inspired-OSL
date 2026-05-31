@@ -44,7 +44,8 @@ class PPOConfig:
     log_std_init: float = -0.5
     backbone: str = "connectome"       # "connectome" | "gru"
     gru_hidden: int = 421              # GRU hidden (≈ connectome's 423-node state, for scale parity)
-    latent_dim: int = 32
+    latent_dim: int = 32               # number of connectome output (MBON fan-in) nodes
+    feature_dim: int = 8               # per-node feature channels D; capacity knob (D=8 ~140K params)
     message_passing_steps: int = 6
     weights_csv: str = "assets/connectome/weights.csv"
     metadata_csv: str = "assets/connectome/metadata.csv"
@@ -151,6 +152,7 @@ class PPOTrainer:
             weights_csv=cfg.weights_csv,
             metadata_csv=cfg.metadata_csv,
             latent_dim=cfg.latent_dim,
+            feature_dim=cfg.feature_dim,
             message_passing_steps=cfg.message_passing_steps,
             log_std_init=cfg.log_std_init,
             backbone=cfg.backbone,

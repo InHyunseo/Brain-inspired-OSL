@@ -156,16 +156,27 @@ class Connectome(nn.Module):
         latent_dim: int = 32,
         message_passing_steps: int = 6,
         activation: str = "tanh",
+        feature_dim: int = 8,
     ):
         super().__init__()
         connectivity, layout = load_connectome_layout(weights_csv, metadata_csv, latent_dim)
         self.layout = layout
-        self.latent_dim = int(latent_dim)
+        # Each node now carries a D-dim feature vector instead of a scalar, so a
+        # single edge can route a richer message and the 6-hop recurrence has the
+        # capacity to learn a real policy. `latent_dim` here names the number of
+        # output *nodes* (kept for layout/back-compat); the actual latent fed to
+        # the policy head is those nodes' D-dim states flattened -> see `out_dim`.
+        self.feature_dim = int(feature_dim)
+        self.num_output_nodes = int(latent_dim)
         self.message_passing_steps = int(message_passing_steps)
         self.state_activation = _activation(activation)
-        self.state_size = layout.total_node_count
-
         n_total = layout.total_node_count
+        self.n_total = n_total
+        # state is stored flattened as (B, N*D); state_size keeps that convention
+        # so runners/buffers (which mask with (B,1)) treat it as one hidden vector.
+        self.state_size = n_total * self.feature_dim
+        self.latent_dim = len(layout.output_indices) * self.feature_dim
+
         mask = np.zeros((n_total, n_total), dtype=np.float32)
         mask[: layout.base_node_count, : layout.base_node_count] = connectivity
         if layout.left_orn_indices:
@@ -179,13 +190,18 @@ class Connectome(nn.Module):
         edge_sources, edge_targets = np.nonzero(mask)
         self.register_buffer("edge_sources", torch.as_tensor(edge_sources, dtype=torch.long))
         self.register_buffer("edge_targets", torch.as_tensor(edge_targets, dtype=torch.long))
-        self.edge_weight = nn.Parameter(torch.empty(len(edge_sources)))
-        self.bias = nn.Parameter(torch.zeros(n_total))
+        # Per-edge D-dim gate: a single synapse modulates each feature channel.
+        self.edge_weight = nn.Parameter(torch.empty(len(edge_sources), self.feature_dim))
+        # Per-node channel mixer so the D channels actually interact (depthwise
+        # aggregation alone would keep channels independent). Shared across nodes.
+        self.channel_mix = nn.Linear(self.feature_dim, self.feature_dim)
+        self.norm = nn.LayerNorm(self.feature_dim)
+        self.bias = nn.Parameter(torch.zeros(n_total, self.feature_dim))
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
         if self.edge_weight.numel() > 0:
-            nn.init.xavier_uniform_(self.edge_weight.unsqueeze(0))
+            nn.init.xavier_uniform_(self.edge_weight)
         with torch.no_grad():
             self.bias.zero_()
 
@@ -193,23 +209,38 @@ class Connectome(nn.Module):
         return torch.zeros(batch_size, self.state_size, device=device)
 
     def _inject_sensors(self, state: torch.Tensor, sensor_obs: torch.Tensor) -> torch.Tensor:
+        # state: (B, N, D). Drive sensor nodes' channel 0 with the raw reading;
+        # other channels are left for the network to populate via message passing.
         next_state = state.clone()
-        next_state[:, self.layout.left_sensor_index] = sensor_obs[:, 0]
-        next_state[:, self.layout.right_sensor_index] = sensor_obs[:, 1]
+        next_state[:, self.layout.left_sensor_index, 0] = sensor_obs[:, 0]
+        next_state[:, self.layout.right_sensor_index, 0] = sensor_obs[:, 1]
         return next_state
 
     def _aggregate(self, state: torch.Tensor) -> torch.Tensor:
-        agg = torch.zeros(state.shape[0], self.state_size, dtype=state.dtype, device=state.device)
+        # state: (B, N, D) -> messages along edges, depthwise-gated, scattered to
+        # targets. Returns aggregated (B, N, D).
+        B, N, D = state.shape
+        agg = torch.zeros(B, N, D, dtype=state.dtype, device=state.device)
         if self.edge_weight.numel() == 0:
             return agg
-        messages = state[:, self.edge_sources] * self.edge_weight.unsqueeze(0)
+        messages = state[:, self.edge_sources] * self.edge_weight.unsqueeze(0)  # (B, E, D)
         agg.index_add_(1, self.edge_targets, messages)
         return agg
 
     @property
     def group_indices(self) -> dict[str, list[int]]:
-        """Cell-type partition of the hidden state for analysis (see layout)."""
-        return self.layout.analysis_group_indices()
+        """Cell-type partition of the *flattened* (N*D) hidden state for analysis.
+
+        The layout groups are node indices; with D-dim node features each node i
+        occupies flat slots [i*D, i*D+D). We expand every group accordingly so
+        ablation patches and per-group readouts address the right slots.
+        """
+        D = self.feature_dim
+        node_groups = self.layout.analysis_group_indices()
+        return {
+            name: [i * D + c for i in nodes for c in range(D)]
+            for name, nodes in node_groups.items()
+        }
 
     def forward_step(
         self,
@@ -218,15 +249,20 @@ class Connectome(nn.Module):
         mask: torch.Tensor,
         patch: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        current = state * mask
+        # state arrives flattened (B, N*D); work in (B, N, D) then flatten back.
+        B = state.shape[0]
+        current = (state * mask).view(B, self.n_total, self.feature_dim)
         for _ in range(self.message_passing_steps):
             current = self._inject_sensors(current, sensor_obs)
-            pre = self._aggregate(current) + self.bias
-            current = self.state_activation(pre)
+            pre = self._aggregate(current) + self.bias              # (B, N, D)
+            pre = self.channel_mix(pre)                             # mix channels
+            update = self.state_activation(self.norm(pre))
+            current = current + update                              # residual for stable 6-hop grad
             current = self._inject_sensors(current, sensor_obs)
-        current = _apply_patch(current, patch)
-        latent = current[:, list(self.layout.output_indices)]
-        return latent, current
+        current_flat = _apply_patch(current.reshape(B, -1), patch)
+        current = current_flat.view(B, self.n_total, self.feature_dim)
+        latent = current[:, list(self.layout.output_indices)].reshape(B, -1)
+        return latent, current_flat
 
     def forward_sequence(
         self,
@@ -251,7 +287,8 @@ class Connectome(nn.Module):
             "left_orn_count": len(self.layout.left_orn_indices),
             "right_orn_count": len(self.layout.right_orn_indices),
             "mbon_count": len(self.layout.mbon_indices),
+            "feature_dim": self.feature_dim,
             "latent_dim": self.latent_dim,
-            "active_edge_count": int(self.edge_weight.numel()),
+            "active_edge_count": int(self.edge_sources.numel()),
             "message_passing_steps": self.message_passing_steps,
         }
