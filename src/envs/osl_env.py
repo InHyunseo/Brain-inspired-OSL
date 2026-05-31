@@ -71,7 +71,11 @@ class EnvConfig:
     reward_goal: float = 20.0
     # Shaping: rate of log-concentration change ("chemotaxis information").
     # Clipped to ±reward_log_clip to keep dlog/dt from exploding near c=0.
-    reward_log_k: float = 0.05
+    # This is the ONLY directional signal ("am I heading up-gradient?"). Raised
+    # 0.05 -> 0.15 because at 0.05 the per-step dlog reward was tiny and averaged
+    # to ~0 over an episode, giving the policy almost no gradient to learn "go
+    # toward the source" — dist stayed pinned near the spawn radius.
+    reward_log_k: float = 0.15
     reward_log_clip: float = 0.5
     # Dense concentration reward: proportional to current normalized sensor
     # average c_avg / c_peak. Provides a smooth potential field toward the
