@@ -31,7 +31,7 @@ def _cast_psd(head_rel: np.ndarray, label: np.ndarray) -> dict:
         from scipy.signal import welch
     except Exception:
         return {"peak_hz": None, "freqs": [], "power": []}
-    mask = label == LABEL_TO_INT["CAST"]
+    mask = label == LABEL_TO_INT["ACTIVE_SENSING"]
     if mask.sum() < 16:
         return {"peak_hz": None, "freqs": [], "power": []}
     sig = head_rel[mask].astype(np.float64)

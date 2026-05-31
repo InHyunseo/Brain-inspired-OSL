@@ -2,13 +2,21 @@
 
 Labels collapse the env's 6 event flags (``event_is_*`` from
 ``src/envs/events.py::classify_event``) into a single categorical label per
-timestep with a fixed priority order. Five mutually-exclusive labels:
+timestep. We use three mutually-exclusive labels, because only two behaviors are
+both well-defined and analytically interesting:
 
-    0 = RUN        — forward locomotion (is_run)
-    1 = CAST       — head sweep while stopped (low_sweep | high_cast_like)
-    2 = TURN       — body reorientation (turn_like, not running)
-    3 = SPIN       — pathological over-rotation (spin_like)
-    4 = STOP       — stopped, no sweep/turn/spin
+    0 = RUN             — forward locomotion (is_run). Ablating it trivially stops
+                          progress, so it serves only as a control.
+    1 = ACTIVE_SENSING  — head sweep while stopped ("casting"): the animal actively
+                          moves its sensors to gather gradient information. This is
+                          the behavior of interest.
+    2 = OTHER           — everything else (body reorientation / stop / spin). The
+                          old TURN label was a catch-all (≈75% of steps, "not a
+                          clean run, not a sweep") and STOP/SPIN were too rare
+                          (<0.2%) to analyze, so they are merged here as background.
+
+Priority (high→low): ACTIVE_SENSING > RUN > OTHER — an active head sweep is the
+salient behavior and overrides locomotion when both flags fire.
 
 Mirrors osl_analysis ``utils/segment.py`` (segment_ratios / run_length /
 transition_matrix) so the rest of the pipeline is label-set agnostic.
@@ -17,10 +25,12 @@ from __future__ import annotations
 
 import numpy as np
 
-LABELS = ("RUN", "CAST", "TURN", "SPIN", "STOP")
+LABELS = ("RUN", "ACTIVE_SENSING", "OTHER")
 LABEL_TO_INT = {name: i for i, name in enumerate(LABELS)}
 INT_TO_LABEL = {i: name for name, i in LABEL_TO_INT.items()}
 N_LABELS = len(LABELS)
+# Short display alias for figures/talks.
+LABEL_DISPLAY = {"RUN": "RUN", "ACTIVE_SENSING": "active sensing", "OTHER": "other"}
 
 # Event-flag keys recorded per timestep (see eval_dump trace `events` field).
 EVENT_KEYS = (
@@ -36,26 +46,21 @@ EVENT_KEYS = (
 def labels_from_event_flags(events: np.ndarray) -> np.ndarray:
     """Collapse per-timestep event flags into a single int8 label array.
 
-    ``events`` is ``(T, 6)`` in EVENT_KEYS order. Priority (high→low):
-    SPIN > CAST > TURN > RUN > STOP. SPIN first because it is pathological;
-    CAST before TURN because an active head sweep is the salient behavior.
+    ``events`` is ``(T, 6)`` in EVENT_KEYS order. Three labels, priority (high→low):
+    ACTIVE_SENSING > RUN > OTHER. Active head sweeps (low_sweep | high_cast_like)
+    win because they are the salient information-gathering behavior; everything
+    that is neither a clean run nor an active sweep falls into OTHER.
     """
     events = np.asarray(events)
     T = events.shape[0]
     is_run = events[:, 0].astype(bool)
-    is_stop = events[:, 1].astype(bool)
     is_low_sweep = events[:, 2].astype(bool)
     is_high_cast = events[:, 3].astype(bool)
-    is_turn = events[:, 4].astype(bool)
-    is_spin = events[:, 5].astype(bool)
+    active_sensing = is_low_sweep | is_high_cast
 
-    out = np.full(T, LABEL_TO_INT["STOP"], dtype=np.int8)
-    cast = is_low_sweep | is_high_cast
-    # Apply in reverse priority so higher priority overwrites.
+    out = np.full(T, LABEL_TO_INT["OTHER"], dtype=np.int8)
     out[is_run] = LABEL_TO_INT["RUN"]
-    out[is_turn & ~is_run] = LABEL_TO_INT["TURN"]
-    out[cast] = LABEL_TO_INT["CAST"]
-    out[is_spin] = LABEL_TO_INT["SPIN"]
+    out[active_sensing] = LABEL_TO_INT["ACTIVE_SENSING"]   # overrides run
     return out
 
 

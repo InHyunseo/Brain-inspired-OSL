@@ -1,132 +1,115 @@
-# Odor Source Localization with RL: Behavior Modules in a GRU Policy, and a Connectome Attempt
+# Odor Source Localization with RL: Active Sensing in a GRU Policy, and a Connectome Attempt
 
-> 7-minute talk. Slides + speaker notes + backup.
-> Flow: behavior = agent action → OSL task → GRU policy → training results → analysis tools (top-k, ablation, dynamics) → findings → connectome attempt & next steps.
-
----
-
-## Slide 1 — Behavior as agent action; the OSL task
-
-### Show
-- A plume heatmap with an agent trajectory reaching the source (one frame of the best-seed gif).
-- The action space, framed as "behavior."
-
-### Content
-- **Behavior is defined as the agent's action.** The 3-D continuous action is: forward speed, body angular velocity, **head angular velocity (casting)**. From these we later label discrete behaviors (RUN / TURN / CAST / SPIN / STOP).
-- **Task = Odor Source Localization (OSL)**: reach an unseen odor source using only local concentration. Gaussian plume (σ=30mm, models slow fluid/solid diffusion). Spawn 55–70mm away, success within 7.5mm, episode ≤1200 steps.
-- **Partially observed (POMDP)**: only current concentration is visible; direction must be integrated over time in the hidden state.
-- **Observation (6-D)**: left/right sensor, **dlog** (temporal change of log-concentration — the "am I going up-gradient?" cue), and 3 efference-copy channels.
-
-### Speaker notes
-> "We frame behavior as the agent's action — forward, body turn, and an independent head turn that lets *casting* emerge. The task is odor source localization: reach an invisible source from local concentration only. It's partially observed — the agent sees concentration, not direction, so it must integrate over time. The key signal is dlog, the temporal change in concentration."
+> 7-minute talk. **Outline only** (bullets are slide content, not a script).
+> Slides are written in **English**; delivered orally in **Korean**.
+> Flow: behavior = agent action → OSL task → classical baseline → GRU policy → training results → analysis tools → findings (active sensing) → connectome attempt → next steps.
+>
+> **PNG/GIF column**: each slide lists the exact asset file to place on it. Paths are
+> relative to the repo root. `RUN = runs/ppo_gru_nb_20260531_113633`,
+> `BASE = runs/baseline_chemotaxis`.
 
 ---
 
-## Slide 2 — Policy: a GRU recurrent network
+## Slide 1 — Behavior = agent action; the OSL task
 
-### Show
-- Simple block diagram: obs(6) → GRU(hidden 421) → action(3), value head.
+**Asset:** `RUN/plots/agent_seed20000.gif` (one frame = plume heatmap + agent trajectory reaching source)
 
-### Content
-- **GRU recurrent layer** carries the hidden state that integrates direction over time (needed for POMDP).
-- Trained with **PPO** (on-policy), success-radius curriculum (20mm → 7.5mm), then a noise curriculum.
+- **Behavior is defined as the agent's action.** 3-D continuous action: forward speed, body angular velocity, **head angular velocity** (the channel that lets *active sensing / casting* emerge). Discrete behavior labels are derived from these post-hoc.
+- **Task = Odor Source Localization (OSL):** reach an unseen source from local concentration only. Gaussian plume (σ=30 mm). Spawn 55–70 mm away, success within 7.5 mm, episode ≤ 1200 steps.
+- **Partially observed (POMDP):** only current concentration is visible; *direction* must be integrated over time.
+- **Observation (6-D):** L sensor, R sensor, **dlog** (temporal change of log-concentration — the "am I going up-gradient?" cue), + 3 efference-copy channels.
+
+---
+
+## Slide 2 — Baseline first: a hand-built chemotaxis controller
+
+**Asset:** `BASE/noise_sweep.png` (success rate vs noise for the classical FSM)
+
+- Before any learning: a **classical bilateral-chemotaxis FSM** (no network). Steer toward the stronger sensor at fixed gain; switch to head-sweep ("cast") mode when the signal weakens. Textbook biological strategy, hand-coded.
+- **Solves the clean task: 100% success** (mean 456 steps); holds under mild noise (98–100% at strength 0.3).
+- **Brittle to turbulence:** drops to **~42–47%** at the hardest noise (strength 1.0).
+- **Its casting is a fixed heuristic** — same rule regardless of environment.
+- **Motivation for RL:** the hand-built controller works but is rigid and degrades under noise. Can a *learned* policy be more robust — and discover *for itself* a strategy (e.g. *when* to cast)? (We revisit this in Slide 7: the RL policy adapts its casting to the environment; the FSM cannot.)
+
+---
+
+## Slide 3 — Policy: a GRU recurrent network
+
+**Asset:** block diagram (make in slides) — `obs(6) → GRU(hidden 421) → action(3) + value head`
+
+- **GRU recurrent layer** carries the hidden state that integrates direction over time (required for POMDP).
+- Trained with **PPO** (on-policy); success-radius curriculum (20 mm → 7.5 mm), then a noise curriculum.
 - ~542K parameters.
 
-### Speaker notes
-> "The policy is a GRU recurrent network. The recurrence is essential — it's how the agent remembers direction in a partially observed task. We train it with PPO, gradually tightening the success radius and then adding plume noise."
+---
+
+## Slide 4 — Training results: the GRU learns
+
+**Assets:**
+- `RUN/plots/agent_seed20000.gif` (best-seed trajectory)
+- training curves PNG — *regenerate in `ipynb` cell 9* (not yet saved to disk)
+
+- Clean field: **success ~74–88%**, distance 55–70 mm → **7.5 mm** target reached; entropy ~0.36 stable; converged ~2.4M steps.
+- Holds under mild noise; degrades as dynamic-plume noise grows (Slide 6).
+- **Key caveat:** the policy only solves the task with **stochastic actions** — deterministic (mean action) gives ~0% success. Exploration noise is functionally required by the weak signal → **all analysis below uses stochastic rollouts.**
 
 ---
 
-## Slide 3 — Training results: the GRU learns
+## Slide 5 — Analysis tools: how we open the policy
 
-### Show
-- **Training curves** (success rate, distance-to-source vs steps) — clean convergence.
-- **Best-seed trajectory gif** (`plots/agent_seed20000.gif`).
-- A small table of success vs noise stage/strength.
+**Asset:** 4-step pipeline arrow (make in slides): **label → decode (top-k) → dynamics → causal ablation**
 
-### Content
-- Clean field: **success ~74–88%**, distance 55–70mm → **7.5mm** (target reached); stable entropy (~0.36), converged by ~2.4M steps.
-- Holds under mild noise; degrades as dynamic-plume noise grows (see analysis).
-- **Important caveat**: this policy only solves the task with **stochastic actions** — deterministic (mean action) gives ~0% success. Exploration noise is functionally required by the weak odor signal. (All evaluation/analysis below is stochastic.)
-
-### Speaker notes
-> "The GRU learns it. From 55–70mm out it reaches the 7.5mm target, ~74–88% success on the clean field. One important detail we found: the policy only works when it acts stochastically — evaluate it deterministically and it fails completely. The exploration randomness is part of how it solves a weak-signal task, so all our analysis uses stochastic rollouts."
+- **Behavior labeling:** classify each timestep. We keep **3 labels** — RUN (locomotion, trivial control), **ACTIVE_SENSING** (head-sweep "casting", the behavior of interest), OTHER (everything else). (Old TURN was a ~75% catch-all; STOP/SPIN were <0.2% and unreliable.)
+- **Linear decoding + top-k neurons:** logistic probe `h_t → behavior`; neuron contribution = `|W[behavior, neuron]|`; take **top-k neurons per behavior** = that behavior's module.
+- **Dynamics:** local Jacobian `J_t = ∂h_{t+1}/∂h_t`; its **dominant eigenvalue** (largest |λ|) tells whether the governing mode oscillates (Im≠0) or just decays (Im=0).
+- **Causal ablation:** zero a behavior's top-k neurons during live rollout; success drop = causal contribution. (Ran it, but the deltas were ambiguous at high noise — not shown.)
 
 ---
 
-## Slide 4 — Analysis tools: how we open the policy (brief, principled)
+## Slide 6 — Findings: active sensing
 
-### Show
-- A 4-step pipeline arrow: label → decode (top-k) → dynamics → causal ablation.
+> We focus on the one behavior that is both well-defined and interesting: **active sensing** (stop + head-sweep to read the gradient). RUN is a trivial control; everything else is OTHER.
 
-### Content (keep short, just name the methods we'll use)
-- **Behavior labeling**: classify each timestep into RUN/TURN/CAST/SPIN/STOP from kinematics.
-- **Linear decoding + top-k neurons**: fit a logistic-regression probe `h_t → behavior`; neuron contribution = `|W[behavior, neuron]|`; take the **top-k neurons per behavior** as that behavior's module.
-- **Dynamics**: local Jacobian `J_t = ∂h_{t+1}/∂h_t`; eigenvalues → oscillatory vs decaying modes.
-- **Causal ablation**: zero a behavior's top-k neurons during live rollout; the drop in success rate = that module's causal contribution. (Correlation → intervention.)
+**Assets (in `presentation_assets/`):**
+- `slide6_active_sensing_overlap.png` — active-sensing top-k overlap vs clean (drops toward ~0.10)
+- `slide6_jacobian_run.png` + `slide6_jacobian_active_sensing.png` — eigenvalue clouds; grey = all modes, red = the dominant mode per timestep
+- `slide6_jacobian_oscillation.png` — dominant-mode oscillation fraction, Run 0.03 vs Active sensing 0.50
 
-### Speaker notes
-> "To open the policy we use four tools. We label behaviors, then **decode** them from the hidden state with a linear probe — the probe weights rank which neurons code each behavior, giving a **top-k neuron set per behavior**. We look at the **dynamics** via the Jacobian's eigenvalues, and finally we **causally test** each module by zeroing its top-k neurons and measuring the success drop. Decoding finds candidates; ablation proves causation."
+- **Active sensing rises sharply with noise:** frequency **0.7% → 0.6% → 1.9% → 5.9%** as dynamic-plume noise grows 0.0 → 0.3 (**≈8×** clean→noisy). Unstable signal → more active sensing. Biologically expected.
+- **The neurons implementing it are reassigned with the environment:** active-sensing top-k overlap vs clean = **1.00 → 0.68 → 0.28 → 0.10**. Same behavior, different neurons per environment.
+- **Its dynamics oscillate, RUN's don't:** the dominant Jacobian eigenvalue is oscillatory (Im≠0) for **0.50** of active-sensing timesteps vs **0.03** for RUN — the head-sweep rhythm shows up as a neural oscillation. Linear probe also decodes behavior above chance (**0.77 vs 0.71**).
 
----
-
-## Slide 5 — Findings
-
-### Show
-- **Per-behavior top-k overlap vs noise** (overlap_all_behaviors.png) — drops toward ~0.1.
-- **Per-behavior ablation Δsuccess vs noise** (per_behavior_ablation.png).
-- **top-k neuron UMAP per noise** (topk_umap_by_noise.png) — behavior clusters.
-
-### Content (confirmed)
-- **The hidden state encodes behavior**: linear probe ~77% (chance 71%), with clearly separable modules (TURN/SPIN/CAST high F1).
-- **Each behavior has a distinct top-k neuron set** — functional modules exist.
-- **Distinct dynamics per module**: RUN ≈ pure decay (oscillatory ~3%), CAST/STOP strongly oscillatory (25–58%) — the network implements casting's rhythm as a neural oscillation.
-- **Causal ablation**: zeroing a module's top-k neurons selectively breaks that function. CAST/STOP/RUN are the strong causal drivers; TURN is comparatively redundant.
-- **★ Environment-dependent reassignment ★**: as dynamic-plume noise grows (0.0→0.3), the top-k neurons coding each behavior are **almost completely reassigned** — CAST overlap vs clean drops **1.0 → 0.39 → 0.19 → 0.07**. The same behavior is carried by different neurons in different environments. (UMAP checks whether behavior clusters persist despite the reassignment.)
-
-### Content (to verify — do not assert yet)
-- Whether CAST *increases* with noise: in current stochastic traces CAST frequency stays ~75% (slightly down), so "cast rises with noise" is **not yet supported** — flagged for re-check before the talk.
-
-### Speaker notes
-> "Four findings. One: behavior is linearly decodable from the hidden state, and each behavior has its own top-k neuron set — real functional modules. Two: those modules have different dynamics — straight runs are non-oscillatory, casting and stopping are oscillatory; the network literally implements casting's rhythm as an oscillation. Three: ablation confirms causation — zeroing a module's neurons breaks that function, and casting, running, stopping are the causal drivers. Four, the most striking: when the plume becomes more variable, the neurons coding each behavior are almost entirely reassigned — clean-condition cast neurons overlap only 7% with the high-noise ones. The same function, carried by different neurons depending on the environment."
+**Honest caveats (state briefly):**
+- Hidden-state separation is *partial* (probe 0.77, slightly negative silhouette).
+- Jacobian is a **local linearization** read off the **dominant** mode — standard, and conservative for our claim, but not the full nonlinear picture.
 
 ---
 
-## Slide 6 — Connectome attempt: structure, and why it failed
+## Slide 7 — Connectome attempt: structure & why it failed
 
-### Show
-- The connectome graph: 389-node larva connectivity (from CSVs) + sensor/MBON I/O nodes.
-- A parameter-count comparison: GRU 542K vs connectome ~17.5K.
+**Assets:**
+- connectome graph diagram (make in slides): 389-node larva connectivity + ORN inputs / MBON outputs
+- param-count comparison (make in slides): **GRU 542K vs connectome ~17.5K (1/30)**
 
-### Content
-- **Goal**: replace the generic GRU with the *real larva connectome* as the policy's recurrent structure — a biologically constrained network.
-- **How it's built (not a generic GNN — built directly from two CSVs):**
-  - `weights.csv`: a **389×389 connectivity matrix** (real synapse counts; ~15.5K nonzero edges).
-  - `metadata.csv`: per-node cell-type/side metadata (`is_orn`, `is_left_orn`, `is_mbon`, …) → designates **sensor input nodes (ORN)** and **output nodes (MBON fan-in)**.
-  - At each env step, inject the 2 sensor readings into the ORN nodes, run **6 synchronous message-passing steps** over the fixed sparse graph (learnable per-edge scalar = synapse strength), read the policy latent from the MBON nodes.
-- **Result: training failed** — 0% success, distance never decreases.
-- **Likely cause**: ~**1/30 the parameters** of the GRU (17.5K vs 542K), plus a sparse, 6-hop-recurrent structure → weak/slow gradients and low capacity. The biological constraint that saves parameters appears to cost trainability.
-
-### Speaker notes
-> "Finally, the connectome attempt. Instead of a generic GRU, we wanted the *real* larva wiring as the policy. It's built directly from two CSVs — a 389×389 connectivity matrix of real synapse counts, and per-neuron metadata that tags which nodes are sensory inputs and which are outputs. Each step we inject the sensors, run six message-passing rounds over this fixed sparse graph with learnable synapse strengths, and read out the action.
-> It failed to learn — zero success. The likely reason is scale: about one-thirtieth the parameters of the GRU, in a sparse six-hop recurrent graph, gives weak gradients and limited capacity. The biological constraint that saves parameters seems to cost trainability."
+- **Goal:** replace the generic GRU with the *real larva connectome* as the recurrent policy — a biologically constrained network. **(Built directly from two CSVs, not a generic GNN.)**
+  - `weights.csv`: **389×389** connectivity (real synapse counts; ~15.5K nonzero edges).
+  - `metadata.csv`: per-node cell-type/side (`is_orn`, `is_mbon`, …) → designates **ORN sensor inputs** and **MBON outputs**.
+  - Per env step: inject 2 sensor readings into ORN nodes, run **6 message-passing steps** over the fixed sparse graph (learnable per-edge scalar = synapse strength), read latent from MBON nodes.
+- **Result: training failed** — ~0% success, distance never decreases.
+- **Robust to the learning algorithm:** also tried gradient-free **evolution strategies** on a spiking version → still ~0% success.
+- **Likely cause:** ~**1/30 the parameters**, sparse 6-hop recurrence → weak/slow gradients, low capacity. The biological constraint that saves parameters appears to cost trainability.
 
 ---
 
-## Slide 7 — Next steps (2 weeks) & open questions
+## Slide 8 — Next steps (2 weeks) & open questions
 
-### Show
-- Short bullet list; invite feedback.
+**Asset:** none (bullet list; invite feedback)
 
-### Content
-- **Consolidate 3D results** (the 3D version of this pipeline) and report them.
-- **Diagnose the connectome failure from an RL/ML angle**, not just "too few params":
-  - Candidate: **initial-weight normalization / scaling** — sparse 6-hop tanh recurrence may vanish or saturate at init (we already saw a residual-accumulation divergence when scaling node features; init scaling is the natural next suspect).
-  - Other angles: gradient flow through 6 unrolled hops, learning-rate/optimizer per-structure, capacity vs trainability trade-off.
-- **Feedback welcome** — especially on making the biologically-constrained network trainable.
-
-### Speaker notes
-> "Over the next two weeks I'll consolidate the 3D results and dig into *why* the connectome failed — from an RL/ML angle, not just 'too few parameters.' My current suspicion is initialization: a sparse six-hop tanh recurrence can vanish or saturate at init, so weight normalization or init scaling is the first thing I want to try. I'd really welcome feedback on getting the biologically-constrained network to train. Thank you."
+- **Contrast with the baseline (callback to Slide 2):** the FSM's casting is a *fixed* rule; the RL policy *adapts* its active sensing to the environment (≈8× rise with noise). That adaptivity is the payoff of learning.
+- **Next 2 weeks:**
+  - Consolidate and report the **3D results**.
+  - Diagnose the connectome failure from an ML angle (init/weight-scaling for the sparse 6-hop recurrence is the first suspect; capacity vs trainability).
+- **Feedback welcome** — especially on training biologically-constrained networks.
 
 ---
 
@@ -134,59 +117,67 @@
 
 ```
 [Task]  Gaussian plume σ=30mm, spawn 55–70mm, success 7.5mm, ≤1200 steps, POMDP
-[Obs 6-D] L-sensor, R-sensor, dlog, fwd-speed, body-ω, head-ω
-[Action 3-D] forward, body-ω, head-ω(cast)
+[Obs 6-D]  L-sensor, R-sensor, dlog, fwd-speed, body-ω, head-ω
+[Action 3-D]  forward, body-ω, head-ω (active sensing / cast)
+
+[Baseline FSM]  hand-coded bilateral chemotaxis (steer + cast mode), no network
+   success vs noise:  clean 100% (456 steps) → 0.3: ~98–100% → 1.0: ~42–47%
+   forcing more casting only hurts (fixed rule): 47% → 13% → 3% as cast threshold raised
 
 [GRU]  hidden 421, ~542K params, PPO, success-radius curriculum 20→7.5mm
        clean success ~74–88%, reaches 7.5mm, entropy ~0.36 stable, ~2.4M steps
        ★ deterministic eval = 0% success → ALL analysis uses stochastic rollouts
 
-[Decoding]  linear probe acc 0.77 (chance 0.71); per-behavior top-k(=16) neuron sets
-[Dynamics]  |λ|max 0.93–0.99; oscillatory: RUN 3% / TURN 8% / CAST 25% / STOP 58%
-[Ablation]  zeroing top-k → CAST/STOP/RUN strong Δ−; TURN ~redundant (stochastic eval)
-[Noise sweep (stage2 × 0.0/0.1/0.2/0.3)]
-   CAST top-k overlap vs clean: 1.00 → 0.39 → 0.19 → 0.07  (all behaviors drop similarly)
-   success: 0.83 / 0.79 / 0.79 / 0.56
-   CAST frequency: ~75% → ~72% (NOT increasing — flagged, verify before talk)
+[Labels]  3-way: RUN / ACTIVE_SENSING (head-sweep "casting") / OTHER
+          (old TURN ~75% catch-all; STOP/SPIN <0.2% — merged into OTHER)
+[Decoding]  linear probe acc 0.77 (chance 0.71); top-k(=16) neurons per behavior
+[Dynamics]  active sensing = oscillatory hidden dynamics; RUN ≈ pure decay
+[Noise sweep (stage2 × 0.0/0.1/0.2/0.3), stochastic eval]
+   ★ active-sensing FREQUENCY: 0.7% → 0.6% → 1.9% → 5.9%  (≈8× rise with noise)
+   ★ active-sensing top-k overlap vs clean: 1.00 → 0.45 → 0.33 → 0.14 (reassigned)
+   episode success rate: 0.84 / 0.84 / 0.81 / 0.54
 
-[Connectome]  weights.csv 389×389 (~15.5K edges, real synapse counts) + metadata.csv
-              (cell-type/side, is_orn/is_mbon) → ORN inputs, MBON outputs
+[Connectome]  weights.csv 389×389 (~15.5K edges) + metadata.csv (is_orn/is_mbon)
               6 message-passing steps/env-step, per-edge scalar = synapse strength
-              ~17.5K params (1/30 of GRU) → training FAILED (0% success)
+              ~17.5K params (1/30 of GRU) → training FAILED (0%), incl. ES on SNN version
 ```
 
 ---
 
-## Appendix B — Figure locations
+## Appendix B — Asset inventory (final, in `presentation_assets/`)
 
 ```
-runs/ppo_gru_nb_20260531_113633/
-├── plots/agent_seed20000.gif                 # best-seed trajectory (Slide 1/3)
-└── analysis/
-    ├── (training_curves_clean.png)           # success/distance vs steps (Slide 3) — regen in notebook cell 9
-    ├── overlap_all_behaviors.png             # per-behavior top-k overlap vs noise (Slide 5)
-    ├── per_behavior_ablation.png             # per-behavior ablation Δsuccess vs noise (Slide 5)
-    ├── topk_umap_by_noise.png                # top-k neuron UMAP per noise (Slide 5)
-    ├── phase2c_neuron_heatmap.png            # neuron contribution heatmap (Slide 4/5)
-    └── phase3a_eigvals_final.png             # Jacobian eigenvalues (dynamics, Slide 5)
+presentation_assets/
+├── slide1_4_trajectory.gif             # Slide 1 & 4 — best-seed trajectory (plume + agent)
+├── slide2_baseline_noise_sweep.png     # Slide 2 — baseline success vs noise (blue)
+├── slide4_training_curves.png          # Slide 4 — Success ratio vs steps, phase 0/1/2 markers
+├── slide6_active_sensing_overlap.png   # Slide 6 — neuron overlap vs clean (1.0 → 0.10)
+├── slide6_jacobian_run.png             # Slide 6 — RUN eigenvalues (dominant on real axis = decay)
+├── slide6_jacobian_active_sensing.png  # Slide 6 — AS eigenvalues (dominant off-axis = oscillation)
+└── slide6_jacobian_oscillation.png     # Slide 6 — oscillation fraction 0.03 vs 0.50
 ```
 
-> Sweep figures are produced by `ipynb/Noise_Sweep_Analysis.ipynb` (run top-to-bottom; traces cached).
+All seven are produced by `ipynb/PPO_GRU_framework.ipynb` (training-curve cell + analysis cell).
+
+> Draw in the slide tool (not auto-generated):
+> - Slide 3: GRU block diagram `obs(6) → GRU(421) → action(3)+value`.
+> - Slide 5: 4-step pipeline arrow `label → decode → dynamics → ablation`.
+> - Slide 7: connectome graph + GRU-vs-connectome param-count bars.
 
 ---
 
-## Appendix C — Open self-check before the talk
+## Appendix C — Pre-talk self-check
 
-- [ ] **CAST-vs-noise frequency**: confirm whether casting actually rises in any sub-region (e.g. near source) before claiming it. Current global trace says no.
-- [ ] **Sample size**: noise 0.2–0.3 ablation/overlap numbers are still a bit noisy — bump `EPISODES_PER_SEED`/`ABLATION_EPS` for clean curves.
-- [ ] **UMAP**: confirm behavior clusters persist across noise (supports "reassignment, not collapse").
-- [ ] **Connectome init fix**: try weight-normalization / init scaling on the sparse 6-hop recurrence; re-test trainability.
+- [ ] All seven PNG/GIF present in `presentation_assets/` (re-run the notebook's plot cells if stale).
+- [ ] Confirm overlap / jacobian figures are the **3-label (active-sensing)** versions.
+- [ ] Draw the three slide-tool diagrams (Slides 3, 5, 7).
+- [ ] (If asked) connectome init fix: try weight-norm / init scaling on the sparse 6-hop recurrence.
 
 ---
 
 ## Appendix D — Tone
 
-- Lead with the **method** ("how we opened the policy"), let findings follow.
-- State only what's confirmed; keep CAST-frequency claim flagged until verified.
-- Frame the connectome as an **honest negative result + concrete next step** (init normalization), and explicitly invite feedback.
-- Titles on every figure describe **what is plotted** (English), not conclusions.
+- Lead with **method** ("how we opened the policy"), let findings follow.
+- State only what's **confirmed**. The connectome is an **honest negative result + concrete next step** (init normalization); explicitly invite feedback.
+- Every figure title describes **what is plotted** (English), not a conclusion.
+- Slides in English; deliver in Korean.

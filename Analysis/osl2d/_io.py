@@ -70,14 +70,21 @@ def load_traces(run_dir: Path, ckpt_labels=None) -> TraceSet:
         h_l.append(data["h"])
         act_l.append(data["action"])
         rew_l.append(data["reward"])
-        lab_l.append(data["label"])
+        ev = (data["events"] if "events" in data.files
+              else np.zeros((T, len(EVENT_KEYS)), dtype=np.float32))
+        ev_l.append(ev)
+        # Re-derive labels from the raw event flags so the CURRENT label set
+        # (segment.labels_from_event_flags) always applies, even to traces dumped
+        # under an older label definition. Falls back to the stored label only if
+        # no events were saved.
+        if "events" in data.files:
+            from Analysis.osl2d.segment import labels_from_event_flags
+            lab_l.append(labels_from_event_flags(ev))
+        else:
+            lab_l.append(data["label"])
         kin_l.append(
             data["kinematics"] if "kinematics" in data.files
             else np.zeros((T, len(KINEMATIC_KEYS)), dtype=np.float32)
-        )
-        ev_l.append(
-            data["events"] if "events" in data.files
-            else np.zeros((T, len(EVENT_KEYS)), dtype=np.float32)
         )
         eid = int(data["episode_id"]) if "episode_id" in data.files else len(ep_lens)
         ep_ids.append(np.full(T, eid, dtype=np.int64))
