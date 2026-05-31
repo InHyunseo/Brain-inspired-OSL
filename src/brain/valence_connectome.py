@@ -33,17 +33,23 @@ class ValenceConnectome(nn.Module):
     """Soft-spiking (LIF) connectome that regresses a scalar valence from a
     sequence of bilateral sensor readings.
 
-    Input  : sensor sequence (B, T, 2) = [c_left, c_right] per step.
+    Input  : input sequence (B, T, in_dim). Default in_dim=5 =
+             [c_left, c_right, v, body_omega, head_omega] — bilateral sensors plus
+             the efference copy of the current action. dlog is a function of the
+             sensor *gradient* × the *movement* (a sensor×action interaction), so
+             the action channels are required to make the target predictable.
     Output : valence sequence (B, T, 1) — prediction of dlog at each step.
 
-    The recurrence (membrane potential carried across T) is what lets the circuit
-    form a *temporal* derivative from instantaneous concentrations.
+    c_left/c_right are injected directly into the ORN sensor nodes; the full input
+    (incl. efference) is also projected onto all nodes through a learned w_in, so
+    the network can form the sensor×movement interaction over its 6-hop recurrence.
     """
 
     def __init__(
         self,
         weights_csv: str | Path = "assets/connectome/weights.csv",
         metadata_csv: str | Path = "assets/connectome/metadata.csv",
+        in_dim: int = 5,
         n_output_nodes: int = 8,
         inner_steps: int = 4,
         leak: float = 0.9,
@@ -62,6 +68,7 @@ class ValenceConnectome(nn.Module):
         self.spike_temp = float(spike_temp)
         self.reset_strength = float(reset_strength)
         self.input_gain = float(input_gain)
+        self.in_dim = int(in_dim)
 
         n = self.N
         mask = np.zeros((n, n), dtype=np.float32)
@@ -83,22 +90,28 @@ class ValenceConnectome(nn.Module):
         scale = 1.0 / np.sqrt(max(1.0, len(src) / n))
         self.w_edge = nn.Parameter(torch.randn(len(src)) * scale)   # synapse strengths
         self.b_node = nn.Parameter(torch.zeros(n))
+        # learned projection of the full input (sensors + efference) onto all nodes,
+        # so the circuit can mix sensor gradient with self-movement (the interaction
+        # that actually predicts dlog).
+        self.w_in = nn.Parameter(torch.randn(self.in_dim, n) * 0.1)
         self.readout = nn.Linear(int(self.output_idx.numel()), 1)   # MBON rates -> valence
 
     def _soft_spike(self, v):
         return torch.sigmoid((v - self.v_threshold) / self.spike_temp)
 
-    def forward(self, sensor_seq: torch.Tensor) -> torch.Tensor:
-        # sensor_seq: (B, T, 2). Returns valence (B, T, 1).
-        B, T, _ = sensor_seq.shape
-        dev = sensor_seq.device
+    def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
+        # input_seq: (B, T, in_dim) = [c_left, c_right, v, body_w, head_w].
+        # Returns valence (B, T, 1).
+        B, T, _ = input_seq.shape
+        dev = input_seq.device
         v = torch.zeros(B, self.N, device=dev)
         s = torch.zeros(B, self.N, device=dev)
         outs = []
         for t in range(T):
-            drive = torch.zeros(B, self.N, device=dev)
-            drive[:, self.left_sensor] = sensor_seq[:, t, 0] * self.input_gain
-            drive[:, self.right_sensor] = sensor_seq[:, t, 1] * self.input_gain
+            x = input_seq[:, t]                                         # (B, in_dim)
+            drive = x @ self.w_in                                       # (B, N) efference proj
+            drive[:, self.left_sensor] = drive[:, self.left_sensor] + x[:, 0] * self.input_gain
+            drive[:, self.right_sensor] = drive[:, self.right_sensor] + x[:, 1] * self.input_gain
             for _ in range(self.inner_steps):
                 msg = s[:, self.src] * self.w_edge.unsqueeze(0)          # (B, E)
                 inp = torch.zeros(B, self.N, device=dev)

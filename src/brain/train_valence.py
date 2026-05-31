@@ -27,15 +27,18 @@ def make_dataset(n_episodes=400, ep_len=120, seed=0, env_kw=None):
     for e in range(n_episodes):
         env = OslEnv(EnvConfig.from_dict(env_kw))
         obs, _ = env.reset(seed=seed + e)
-        sens, dl = [], []
+        feat, dl = [], []
         for _ in range(ep_len):
             a = rng.uniform(-1, 1, 3).astype(np.float32)
+            prev = obs.copy()                          # sensors BEFORE the action
             obs, r, term, trunc, info = env.step(a)
-            sens.append(obs[:2].copy()); dl.append(float(obs[2]))
+            # input = [c_left, c_right (pre-move), v, body_omega, head_omega]
+            feat.append(np.array([prev[0], prev[1], a[0], a[1], a[2]], dtype=np.float32))
+            dl.append(float(obs[2]))                    # dlog AFTER the action
             if term or trunc:
                 break
-        if len(sens) >= 8:
-            S.append(np.asarray(sens, dtype=np.float32))
+        if len(feat) >= 8:
+            S.append(np.asarray(feat, dtype=np.float32))
             D.append(np.asarray(dl, dtype=np.float32))
     return S, D
 
@@ -63,15 +66,30 @@ def masked_mse(pred, target, mask):
 
 
 def baseline_scores(Sx, Dy, mask):
-    """const-0 and best instantaneous-linear MSE (closed-form ridge on [cL,cR,cL-cR,1])."""
+    """Closed-form least-squares MSE for three baselines on the 5-D input
+    [cL, cR, v, body_w, head_w]:
+      - const-0          : predict 0 (= dlog variance)
+      - linear (no inter): best linear map of all 5 inputs — no sensor×action term
+      - linear+interact  : adds sensor×action products (the true predictive structure)
+    The connectome should beat 'linear (no inter)'; approaching 'linear+interact'
+    means its 6-hop nonlinearity captured the sensor×movement interaction.
+    """
     m = mask.bool()
     y = Dy[..., 0][m].numpy()
-    var = float(np.mean(y ** 2))                          # const-0 MSE
-    cL, cR = Sx[..., 0][m].numpy(), Sx[..., 1][m].numpy()
-    X = np.stack([cL, cR, cL - cR, np.ones_like(cL)], 1)
-    coef, *_ = np.linalg.lstsq(X, y, rcond=None)
-    inst = float(np.mean((X @ coef - y) ** 2))            # instantaneous-linear MSE
-    return {"const0_mse": var, "instantaneous_mse": inst}
+    var = float(np.mean(y ** 2))
+    X5 = Sx[m].numpy()                                    # (n, 5)
+    cL, cR = X5[:, 0], X5[:, 1]
+    act = X5[:, 2:5]
+    def fit_mse(feats):
+        F = np.column_stack(feats + [np.ones(len(y))])
+        c, *_ = np.linalg.lstsq(F, y, rcond=None)
+        return float(np.mean((F @ c - y) ** 2))
+    lin = fit_mse([cL, cR, cL - cR, act[:, 0], act[:, 1], act[:, 2]])
+    inter = fit_mse([cL, cR, cL - cR, act[:, 0], act[:, 1], act[:, 2],
+                     act[:, 0] * cL, act[:, 1] * cL, act[:, 2] * cL,
+                     act[:, 0] * cR, act[:, 1] * cR, act[:, 2] * cR,
+                     act[:, 0] * (cL - cR), act[:, 1] * (cL - cR), act[:, 2] * (cL - cR)])
+    return {"const0_mse": var, "linear_mse": lin, "interaction_mse": inter}
 
 
 def train(model, Sx, Dy, mask, epochs=60, lr=1e-2, batch=64, val_frac=0.2, seed=0, verbose=True):
