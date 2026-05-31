@@ -128,10 +128,13 @@ def adapter_for_ckpt(run_dir: Path, ckpt_label: str, device: str | None = None):
     """Rebuild a Policy2DAdapter for `ckpt_label` from its training checkpoint.
 
     Reuses eval_dump's checkpoint resolution so phase3a/3b/4 load the same
-    weights the traces were dumped from.
+    weights the traces were dumped from. Stochastic traces live in a
+    ``{label}__stoch`` dir but share the bare ``{label}`` checkpoint, so strip
+    the suffix before resolving the .pt file.
     """
     from Analysis.osl2d.eval_dump import _resolve_ckpt
     from Analysis.osl2d.policy_adapter import Policy2DAdapter
 
+    ckpt_label = ckpt_label[: -len("__stoch")] if ckpt_label.endswith("__stoch") else ckpt_label
     ckpt_path = _resolve_ckpt(Path(run_dir), ckpt_label)
     return Policy2DAdapter.from_checkpoint(ckpt_path, device=device)

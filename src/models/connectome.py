@@ -256,8 +256,12 @@ class Connectome(nn.Module):
             current = self._inject_sensors(current, sensor_obs)
             pre = self._aggregate(current) + self.bias              # (B, N, D)
             pre = self.channel_mix(pre)                             # mix channels
-            update = self.state_activation(self.norm(pre))
-            current = current + update                              # residual for stable 6-hop grad
+            update = self.state_activation(pre)
+            # Residual + post-norm: the residual keeps the 6-hop gradient alive,
+            # while LayerNorm over the *summed* state caps its magnitude so it
+            # cannot accumulate across the 6 inner steps and across env steps
+            # (without this the state grew linearly each step and saturated tanh).
+            current = self.norm(current + update)
             current = self._inject_sensors(current, sensor_obs)
         current_flat = _apply_patch(current.reshape(B, -1), patch)
         current = current_flat.view(B, self.n_total, self.feature_dim)

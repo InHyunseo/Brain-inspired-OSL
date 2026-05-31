@@ -41,18 +41,26 @@ def _kl(p: dict, q: dict, eps: float = 1e-6) -> float:
     return float(total)
 
 
-def _rollout(env, adapter, seed, patch_indices=None, max_steps=None):
+def _rollout(env, adapter, seed, patch_indices=None, max_steps=None, stochastic=False):
+    import torch
     obs, _ = env.reset(seed=seed)
     hidden = adapter.initial_state()
     rew_buf, ev_buf = [], []
     success = 0
     steps = 0
+    gen = None
+    if stochastic:
+        gen = torch.Generator(device=adapter.device)
+        gen.manual_seed(int(seed) + 777)
     T_cap = max_steps if max_steps is not None else 10_000
     while steps < T_cap:
         patch = None
         if patch_indices is not None:
             patch = {"indices": patch_indices, "value": "zero"}
-        action, h_next = adapter.step_patched(obs, hidden, patch=patch)
+        if stochastic:
+            action, h_next = adapter.step_stochastic(obs, hidden, patch=patch, generator=gen)
+        else:
+            action, h_next = adapter.step_patched(obs, hidden, patch=patch)
         hidden = h_next
         obs, reward, terminated, truncated, info = env.step(action)
         rew_buf.append(float(reward))
@@ -91,7 +99,7 @@ def _agg(runs):
 
 def run(run_dir, ckpt_label="best", seeds=(0,), episodes_per_seed: int = 3,
         max_steps=None, noise_stage: int = 2, noise_strength: float = 1.0,
-        device: str | None = None):
+        device: str | None = None, stochastic: bool = False):
     run_dir = Path(run_dir)
     out_dir = analysis_dir(run_dir)
 
@@ -116,7 +124,8 @@ def run(run_dir, ckpt_label="best", seeds=(0,), episodes_per_seed: int = 3,
     for s in seeds:
         for e in range(int(episodes_per_seed)):
             base_runs.append(_rollout(env, adapter, 10_000 + int(s) * 1000 + e,
-                                      patch_indices=None, max_steps=max_steps))
+                                      patch_indices=None, max_steps=max_steps,
+                                      stochastic=stochastic))
     results["baseline"] = _agg(base_runs)
 
     for group_name, idx_list in groups.items():
@@ -125,7 +134,8 @@ def run(run_dir, ckpt_label="best", seeds=(0,), episodes_per_seed: int = 3,
         for s in seeds:
             for e in range(int(episodes_per_seed)):
                 run_list.append(_rollout(env, adapter, 10_000 + int(s) * 1000 + e,
-                                         patch_indices=idx, max_steps=max_steps))
+                                         patch_indices=idx, max_steps=max_steps,
+                                         stochastic=stochastic))
         agg = _agg(run_list)
         results["ablated"][group_name] = agg
         base = results["baseline"]

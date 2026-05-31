@@ -28,6 +28,10 @@ def main(argv=None):
     p.add_argument("--device", default=None)
     p.add_argument("--skip-collect", action="store_true",
                    help="Run analyses on existing traces; skip rollout/dump.")
+    p.add_argument("--stochastic", action="store_true",
+                   help="Sample actions during trace collection instead of using the "
+                        "distribution mean. Needed for policies that only solve the task "
+                        "with exploration noise (deterministic mean stalls on weak signal).")
     p.add_argument("--skip-ablation", action="store_true",
                    help="Skip Phase 4 (live-env ablation).")
     p.add_argument("--ablation-seeds", type=int, nargs="+", default=None)
@@ -39,29 +43,36 @@ def main(argv=None):
 
     run_dir = Path(args.run_dir)
 
+    # Stochastic traces are written to `{label}__stoch` dirs (see eval_dump), so
+    # the trace-consuming phases must look there. Checkpoint *loading* (phase4)
+    # still uses the bare label.
+    trace_labels = ([f"{cl}__stoch" for cl in args.checkpoints]
+                    if args.stochastic else list(args.checkpoints))
+
     if not args.skip_collect:
         for cl in args.checkpoints:
-            print(f"[run_all] collecting traces for ckpt='{cl}' ...")
+            print(f"[run_all] collecting traces for ckpt='{cl}' "
+                  f"({'stochastic' if args.stochastic else 'deterministic'}) ...")
             eval_dump.collect(
                 run_dir=run_dir, ckpt_label=cl, seeds=args.seeds,
                 episodes_per_seed=args.episodes_per_seed, max_steps=args.max_steps,
                 noise_stage=args.noise_stage, noise_strength=args.noise_strength,
-                device=args.device,
+                device=args.device, stochastic=args.stochastic,
             )
 
     print("[run_all] phase1 ...")
-    phase1_label.run(run_dir, args.checkpoints)
+    phase1_label.run(run_dir, trace_labels)
     print("[run_all] phase2a ...")
-    phase2a_latent_viz.run(run_dir, args.checkpoints)
+    phase2a_latent_viz.run(run_dir, trace_labels)
     print("[run_all] phase2b ...")
-    phase2b_probe.run(run_dir, args.checkpoints, train_episodes_now=args.probe_train_eps_now)
+    phase2b_probe.run(run_dir, trace_labels, train_episodes_now=args.probe_train_eps_now)
     print("[run_all] phase2c ...")
-    phase2c_neuron.run(run_dir, args.checkpoints, top_k=args.top_k)
+    phase2c_neuron.run(run_dir, trace_labels, top_k=args.top_k)
     print("[run_all] phase3a ...")
-    phase3a_jacobian.run(run_dir, args.checkpoints,
+    phase3a_jacobian.run(run_dir, trace_labels,
                          samples_per_label=args.samples_per_label, device=args.device)
     print("[run_all] phase3b ...")
-    phase3b_fixedpoint.run(run_dir, args.checkpoints, device=args.device)
+    phase3b_fixedpoint.run(run_dir, trace_labels, device=args.device)
 
     if not args.skip_ablation:
         ck = args.checkpoints[0]
@@ -72,7 +83,7 @@ def main(argv=None):
             episodes_per_seed=args.ablation_eps,
             max_steps=args.max_steps,
             noise_stage=args.noise_stage, noise_strength=args.noise_strength,
-            device=args.device,
+            device=args.device, stochastic=args.stochastic,
         )
     else:
         print("[run_all] phase4 skipped (--skip-ablation).")
