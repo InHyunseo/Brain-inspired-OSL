@@ -161,6 +161,16 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         self.field.noise_strength = float(strength)
         self.field.rebuild_noise_grid(initial=True)
 
+    def set_spawn_radius(self, min_radius_mm: float, max_radius_mm: float) -> None:
+        """Update the spawn annulus (distance-to-source curriculum).
+
+        Lets a curriculum start the agent very close to the source — where the
+        plume is strong and the path is short, so success comes quickly — then
+        widen the annulus over phases. Takes effect on the next ``reset()``.
+        """
+        self.cfg.spawn_min_radius_mm = float(min_radius_mm)
+        self.cfg.spawn_max_radius_mm = float(max_radius_mm)
+
     def _sample_spawn_xy(self) -> tuple[float, float]:
         """Rejection-sample (x, y) inside the cue region of the *base* Gaussian.
 

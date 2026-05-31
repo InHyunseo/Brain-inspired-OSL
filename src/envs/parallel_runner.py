@@ -34,6 +34,11 @@ def _env_worker(remote, env_config: dict[str, Any], seed: int) -> None:
                 env.set_noise_stage(int(stage), float(strength))
                 remote.send(True)
                 continue
+            if cmd == "set_spawn_radius":
+                min_r, max_r = data
+                env.set_spawn_radius(float(min_r), float(max_r))
+                remote.send(True)
+                continue
             if cmd == "close":
                 remote.close()
                 break
@@ -101,6 +106,12 @@ class ParallelRunner:
     def set_noise_stage(self, stage: int, strength: float) -> None:
         for remote in self.remotes:
             remote.send(("set_noise_stage", (int(stage), float(strength))))
+        for remote in self.remotes:
+            remote.recv()
+
+    def set_spawn_radius(self, min_radius_mm: float, max_radius_mm: float) -> None:
+        for remote in self.remotes:
+            remote.send(("set_spawn_radius", (float(min_radius_mm), float(max_radius_mm))))
         for remote in self.remotes:
             remote.recv()
 
@@ -178,6 +189,10 @@ class VectorRunner:
     def set_noise_stage(self, stage: int, strength: float) -> None:
         for env in self.envs:
             env.set_noise_stage(int(stage), float(strength))
+
+    def set_spawn_radius(self, min_radius_mm: float, max_radius_mm: float) -> None:
+        for env in self.envs:
+            env.set_spawn_radius(float(min_radius_mm), float(max_radius_mm))
 
     def close(self) -> None:
         for env in self.envs:
