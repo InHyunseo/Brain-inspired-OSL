@@ -17,6 +17,13 @@ from src.envs.odor_field import GaussianOdorField
 class EnvConfig:
     body_length_mm: float = 3.5
     sensor_spacing_mm: float = 0.15
+    # Sensors sit this far ahead of the body point (head tip), along the sensor
+    # heading. With spacing (0.15mm) << plume sigma (30mm) the instantaneous
+    # left/right difference is tiny, so head casting barely changes the reading
+    # when sensors are body-centered (forward=0). Moving them forward makes the
+    # head tip swing on an arc when casting, so c_avg varies ~10% across a sweep
+    # — i.e. casting yields real gradient information the policy can exploit.
+    sensor_forward_mm: float = 2.5
     dt: float = 0.1
     episode_seconds: float = 60.0
     arena_width_mm: float = 80.0
@@ -192,7 +199,10 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _sensor_readings(self) -> dict[str, float]:
         sensor_heading = wrap_angle(self.heading_rad + self.head_relative_angle_rad)
-        coords = sensor_positions(self.x_mm, self.y_mm, sensor_heading, self.cfg.sensor_spacing_mm)
+        coords = sensor_positions(
+            self.x_mm, self.y_mm, sensor_heading,
+            self.cfg.sensor_spacing_mm, self.cfg.sensor_forward_mm,
+        )
         left = self.field.sample(*coords["left"])
         right = self.field.sample(*coords["right"])
         return {
