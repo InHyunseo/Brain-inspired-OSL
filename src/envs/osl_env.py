@@ -21,9 +21,11 @@ class EnvConfig:
     # heading. With spacing (0.15mm) << plume sigma (30mm) the instantaneous
     # left/right difference is tiny, so head casting barely changes the reading
     # when sensors are body-centered (forward=0). Moving them forward makes the
-    # head tip swing on an arc when casting, so c_avg varies ~10% across a sweep
+    # head tip swing on an arc when casting, so c_avg varies across a sweep
     # — i.e. casting yields real gradient information the policy can exploit.
-    sensor_forward_mm: float = 2.5
+    # 1.75 = body_length/2: sensors sit at the head tip if (x, y) is the body
+    # centroid (the dorsal organ of a larva is at the anterior end).
+    sensor_forward_mm: float = 1.75
     dt: float = 0.1
     episode_seconds: float = 60.0
     arena_width_mm: float = 80.0
