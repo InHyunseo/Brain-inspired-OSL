@@ -171,6 +171,16 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         self.cfg.spawn_min_radius_mm = float(min_radius_mm)
         self.cfg.spawn_max_radius_mm = float(max_radius_mm)
 
+    def set_success_radius(self, radius_mm: float) -> None:
+        """Update the goal radius (success-tolerance curriculum).
+
+        Spawn distance stays fixed; instead the bar for "reached the source"
+        starts loose (e.g. 20mm) so the agent gets early successes, then tightens
+        toward the real target (7.5mm) over phases. Takes effect immediately
+        (success is recomputed each step from this value).
+        """
+        self.cfg.success_radius_mm = float(radius_mm)
+
     def _sample_spawn_xy(self) -> tuple[float, float]:
         """Rejection-sample (x, y) inside the cue region of the *base* Gaussian.
 

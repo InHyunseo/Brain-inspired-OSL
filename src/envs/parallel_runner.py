@@ -39,6 +39,10 @@ def _env_worker(remote, env_config: dict[str, Any], seed: int) -> None:
                 env.set_spawn_radius(float(min_r), float(max_r))
                 remote.send(True)
                 continue
+            if cmd == "set_success_radius":
+                env.set_success_radius(float(data))
+                remote.send(True)
+                continue
             if cmd == "close":
                 remote.close()
                 break
@@ -112,6 +116,12 @@ class ParallelRunner:
     def set_spawn_radius(self, min_radius_mm: float, max_radius_mm: float) -> None:
         for remote in self.remotes:
             remote.send(("set_spawn_radius", (float(min_radius_mm), float(max_radius_mm))))
+        for remote in self.remotes:
+            remote.recv()
+
+    def set_success_radius(self, radius_mm: float) -> None:
+        for remote in self.remotes:
+            remote.send(("set_success_radius", float(radius_mm)))
         for remote in self.remotes:
             remote.recv()
 
@@ -193,6 +203,10 @@ class VectorRunner:
     def set_spawn_radius(self, min_radius_mm: float, max_radius_mm: float) -> None:
         for env in self.envs:
             env.set_spawn_radius(float(min_radius_mm), float(max_radius_mm))
+
+    def set_success_radius(self, radius_mm: float) -> None:
+        for env in self.envs:
+            env.set_success_radius(float(radius_mm))
 
     def close(self) -> None:
         for env in self.envs:
