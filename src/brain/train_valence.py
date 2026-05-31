@@ -75,16 +75,17 @@ def baseline_scores(Sx, Dy, mask):
 
 
 def train(model, Sx, Dy, mask, epochs=60, lr=1e-2, batch=64, val_frac=0.2, seed=0, verbose=True):
+    dev = Sx.device                                  # keep index tensors on the data device (GPU-safe)
     n = Sx.shape[0]
-    g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(n, generator=g)
+    g = torch.Generator().manual_seed(seed)          # CPU generator (randperm requires CPU gen)
+    perm = torch.randperm(n, generator=g).to(dev)
     n_val = int(n * val_frac)
     vi, ti = perm[:n_val], perm[n_val:]
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     best = float("inf"); hist = []
     for ep in range(epochs):
         model.train()
-        bperm = ti[torch.randperm(len(ti), generator=g)]
+        bperm = ti[torch.randperm(len(ti), generator=g).to(dev)]
         for j in range(0, len(bperm), batch):
             idx = bperm[j:j + batch]
             opt.zero_grad()
