@@ -1,0 +1,135 @@
+[
+  {
+    "stage": 0,
+    "strength": 0.0,
+    "n": 24,
+    "success_rate": 1.0,
+    "mean_steps_success": 447.2083333333333,
+    "seed_success_rate": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "seed_mean_steps_success": [
+      446.3333333333333,
+      471.6666666666667,
+      442.6666666666667,
+      428.1666666666667
+    ]
+  },
+  {
+    "stage": 1,
+    "strength": 0.3,
+    "n": 24,
+    "success_rate": 0.9583333333333334,
+    "mean_steps_success": 453.4347826086956,
+    "seed_success_rate": [
+      1.0,
+      1.0,
+      1.0,
+      0.8333333333333334
+    ],
+    "seed_mean_steps_success": [
+      450.6666666666667,
+      475.1666666666667,
+      444.8333333333333,
+      441.0
+    ]
+  },
+  {
+    "stage": 1,
+    "strength": 0.6,
+    "n": 24,
+    "success_rate": 0.7083333333333334,
+    "mean_steps_success": 505.11764705882354,
+    "seed_success_rate": [
+      0.8333333333333334,
+      0.8333333333333334,
+      0.3333333333333333,
+      0.8333333333333334
+    ],
+    "seed_mean_steps_success": [
+      499.8,
+      498.4,
+      485.0,
+      525.2
+    ]
+  },
+  {
+    "stage": 1,
+    "strength": 1.0,
+    "n": 24,
+    "success_rate": 0.2916666666666667,
+    "mean_steps_success": 587.5714285714286,
+    "seed_success_rate": [
+      0.3333333333333333,
+      0.16666666666666666,
+      0.16666666666666666,
+      0.5
+    ],
+    "seed_mean_steps_success": [
+      620.0,
+      491.0,
+      458.0,
+      641.3333333333334
+    ]
+  },
+  {
+    "stage": 2,
+    "strength": 0.3,
+    "n": 24,
+    "success_rate": 0.5416666666666666,
+    "mean_steps_success": 755.1538461538462,
+    "seed_success_rate": [
+      0.5,
+      0.5,
+      0.5,
+      0.6666666666666666
+    ],
+    "seed_mean_steps_success": [
+      842.3333333333334,
+      780.6666666666666,
+      727.6666666666666,
+      691.25
+    ]
+  },
+  {
+    "stage": 2,
+    "strength": 0.6,
+    "n": 24,
+    "success_rate": 0.08333333333333333,
+    "mean_steps_success": 961.0,
+    "seed_success_rate": [
+      0.16666666666666666,
+      0.16666666666666666,
+      0.0,
+      0.0
+    ],
+    "seed_mean_steps_success": [
+      842.0,
+      1080.0,
+      NaN,
+      NaN
+    ]
+  },
+  {
+    "stage": 2,
+    "strength": 1.0,
+    "n": 24,
+    "success_rate": 0.041666666666666664,
+    "mean_steps_success": 1039.0,
+    "seed_success_rate": [
+      0.0,
+      0.0,
+      0.16666666666666666,
+      0.0
+    ],
+    "seed_mean_steps_success": [
+      NaN,
+      NaN,
+      1039.0,
+      NaN
+    ]
+  }
+]

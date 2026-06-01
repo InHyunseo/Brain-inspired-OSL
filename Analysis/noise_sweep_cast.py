@@ -101,6 +101,61 @@ def collect_and_topk(strength: float) -> dict:
     return {"label": label, "top": tops, "raw_success": traces_success(RUN_DIR, label)}
 
 
+def _topk_from_traces(traces, label_name: str) -> list[int]:
+    """Top-k neurons for one behavior label from a probe over the given traces."""
+    W, classes = probe_weights_episode(
+        traces.h, traces.label.astype(int), traces.episode_id, seed=0)
+    if W is None:
+        return []
+    contrib = np.abs(W)
+    if contrib.shape[0] == 1 and len(classes) == 2:
+        contrib = np.vstack([contrib, contrib])
+    for row_i, cls in enumerate(classes):
+        if row_i >= contrib.shape[0]:
+            break
+        name = LABELS[int(cls)] if int(cls) < len(LABELS) else str(cls)
+        if name == label_name:
+            return np.argsort(-contrib[row_i])[:TOP_K].astype(int).tolist()
+    return []
+
+
+def topk_per_seed(strength: float, label_name: str) -> dict:
+    """Per-seed top-k neuron sets for one behavior, for a noise level.
+
+    Splits the (cached) stochastic traces by their stored seed and runs a
+    separate probe per seed, yielding one top-k set per seed. Used to build a
+    *distribution* of Jaccard overlaps (→ box plot) rather than a single scalar.
+    Returns {seed: [neuron indices]}.
+    """
+    label = f"{CKPT_LABEL}_{_strength_tag(strength)}__stoch"
+    trace_dir = RUN_DIR / "analysis" / "traces" / label
+    if not (trace_dir.exists() and any(trace_dir.glob("eval_seed*_ep*.npz"))):
+        _dump_traces(strength, label)
+    out = {}
+    for s in SEEDS:
+        per_seed_files = sorted(trace_dir.glob(f"eval_seed{s}_ep*.npz"))
+        if not per_seed_files:
+            continue
+        # load_traces over a temp single-seed view by reusing load_traces' loader
+        # is awkward; instead pool this seed's npz directly.
+        hs, labs, eids = [], [], []
+        for f in per_seed_files:
+            d = np.load(f, allow_pickle=True)
+            hs.append(d["h"]); labs.append(d["label"])
+            eids.append(np.full(len(d["h"]), int(d["episode_id"]), dtype=np.int64))
+        if not hs:
+            continue
+
+        class _T:  # minimal duck-typed traces object for the probe
+            pass
+        t = _T()
+        t.h = np.concatenate(hs, axis=0)
+        t.label = np.concatenate(labs, axis=0)
+        t.episode_id = np.concatenate(eids, axis=0)
+        out[int(s)] = _topk_from_traces(t, label_name)
+    return out
+
+
 def traces_success(run_dir: Path, trace_label: str) -> float:
     s = []
     for f in (run_dir / "analysis" / "traces" / trace_label).glob("eval_seed*_ep*.npz"):

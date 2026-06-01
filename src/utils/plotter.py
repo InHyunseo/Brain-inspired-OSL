@@ -179,6 +179,123 @@ def render_rollout_frame(env, traj_x, traj_y, cast_x, cast_y, step, title=None):
     return np.array(imageio.v2.imread(buf))
 
 
+def render_dual_rollout_frame(env, agents, step, title=None):
+    """One frame with TWO agents racing on the same plume.
+
+    `agents` is a list of dicts, each:
+        {"label": str, "color": str, "traj_x": [...], "traj_y": [...],
+         "as_x": [...], "as_y": [...], "done": bool, "success": bool}
+    A finished agent keeps its frozen trajectory (its marker stops moving). The
+    field is taken from `env` (both agents share an identical, lockstep plume).
+    """
+    field, W, H = _plume_field(env)
+    cfg = env.cfg
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    fig.patch.set_facecolor("black")
+    ax.set_facecolor("black")
+    cache_key = id(env)
+    if cache_key not in _RENDER_VMAX_CACHE:
+        _RENDER_VMAX_CACHE[cache_key] = max(1e-6, float(field.max()) * 1.2)
+    vmax = _RENDER_VMAX_CACHE[cache_key]
+    ax.imshow(field, extent=[0.0, W, 0.0, H], origin="lower", cmap="magma",
+              vmin=0.0, vmax=vmax)
+
+    for ag in agents:
+        tx, ty = ag["traj_x"], ag["traj_y"]
+        if not tx:
+            continue
+        ax.plot(tx, ty, color=ag["color"], linewidth=2.0, alpha=0.85)
+        # Current (or frozen) head position.
+        marker = "*" if ag.get("done") and ag.get("success") else "o"
+        ax.scatter([tx[-1]], [ty[-1]], color=ag["color"],
+                   marker=marker, s=130, edgecolors="white", linewidths=0.8,
+                   zorder=12, label=ag["label"] + (" ✓" if ag.get("success") else
+                                                    (" ✗" if ag.get("done") else "")))
+        if ag.get("as_x"):
+            ax.scatter(ag["as_x"], ag["as_y"], color=ag["color"], marker="^",
+                       s=36, alpha=0.5, edgecolors="none", zorder=8)
+
+    ax.scatter([cfg.source_x_mm], [cfg.source_y_mm], color="lime", marker="P",
+               s=160, zorder=11)
+    ax.add_patch(plt.Circle((cfg.source_x_mm, cfg.source_y_mm),
+                            cfg.success_radius_mm, color="gray", fill=False))
+    ax.set_xlim(0.0, W)
+    ax.set_ylim(0.0, H)
+    ax.set_aspect("equal")
+    ax.tick_params(colors="white")
+    ax.set_title(title or f"Step: {step}", color="white")
+    leg = ax.legend(loc="upper left", fontsize=9, framealpha=0.5)
+    if leg is not None:
+        leg.get_frame().set_facecolor("black")
+        for txt in leg.get_texts():
+            txt.set_color("white")
+
+    buf = io.BytesIO()
+    # Fixed bbox (no "tight") so every frame is the same pixel size regardless
+    # of title/legend text width — _harmonize_frames is still applied as a guard.
+    plt.savefig(buf, format="png", dpi=80, facecolor="black")
+    plt.close(fig)
+    buf.seek(0)
+    return np.array(imageio.v2.imread(buf))
+
+
+def run_dual_episode(env_a, env_b, agent_a, agent_b, seed, labels=("A", "B"),
+                     colors=("#50dcff", "#ff6464"), as_event_key="event_is_high_cast_like",
+                     title_fn=None):
+    """Race two controllers on identical, lockstep plumes; render to frames.
+
+    `env_a`/`env_b` are two OslEnv built with the SAME config (so the same seed
+    gives the same plume). Each agent steps until its own episode ends; a
+    finished agent is frozen at its last pose while the other keeps going. The
+    GIF runs until BOTH are done.
+
+    Each controller must expose `.reset()` and `.act(obs) -> action`.
+    Returns (frames, summary) where summary has per-agent success/steps.
+    """
+    obs_a, _ = env_a.reset(seed=seed)
+    obs_b, _ = env_b.reset(seed=seed)
+    agent_a.reset(); agent_b.reset()
+
+    state = [
+        {"label": labels[0], "color": colors[0], "env": env_a, "obs": obs_a,
+         "agent": agent_a, "traj_x": [], "traj_y": [], "as_x": [], "as_y": [],
+         "done": False, "success": False, "steps": 0},
+        {"label": labels[1], "color": colors[1], "env": env_b, "obs": obs_b,
+         "agent": agent_b, "traj_x": [], "traj_y": [], "as_x": [], "as_y": [],
+         "done": False, "success": False, "steps": 0},
+    ]
+    max_steps = max(env_a.max_steps, env_b.max_steps)
+    frames = []
+    for t in range(max_steps):
+        for s in state:
+            # Always record the (possibly frozen) position so the trace is full.
+            s["traj_x"].append(s["env"].x_mm); s["traj_y"].append(s["env"].y_mm)
+            if s["done"]:
+                continue
+            action = s["agent"].act(s["obs"])
+            s["obs"], _r, term, trunc, info = s["env"].step(action)
+            s["steps"] += 1
+            if info.get(as_event_key):
+                s["as_x"].append(s["env"].x_mm); s["as_y"].append(s["env"].y_mm)
+            if term or trunc:
+                s["done"] = True
+                s["success"] = bool(info.get("success", False))
+        ttl = title_fn(t, state) if title_fn else f"step={t}"
+        frames.append(render_dual_rollout_frame(state[0]["env"],
+                                                [_ag_view(s) for s in state], t, title=ttl))
+        if all(s["done"] for s in state):
+            break
+    summary = {s["label"]: {"success": s["success"], "steps": s["steps"]} for s in state}
+    return frames, summary
+
+
+def _ag_view(s):
+    return {"label": s["label"], "color": s["color"], "traj_x": s["traj_x"],
+            "traj_y": s["traj_y"], "as_x": s["as_x"], "as_y": s["as_y"],
+            "done": s["done"], "success": s["success"]}
+
+
 def _harmonize_frames(frames):
     """Crop all frames to the common (min) H×W so they stack into a GIF.
 
