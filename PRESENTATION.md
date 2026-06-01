@@ -10,18 +10,18 @@
 
 ## Baseline: hand-built bilateral chemotaxis (no network)
 
-A classical controller: steer toward the stronger sensor (`body_ω = tanh(gain · (c_L − c_R)/(c_L + c_R))`), drive forward while concentration is rising, stop and sweep the head when it falls. No learning.
+A classical controller: steer toward the stronger sensor (`body_ω = tanh(gain · (c_L − c_R)/(c_L + c_R))`), drive forward while concentration is rising, stop while it falls. Head never moves (no active sensing). No learning.
 
 Success vs noise (n = 200 episodes / condition):
 
 | condition | stage 0, α0.0 | stage 1, α0.3 | α0.6 | α1.0 | stage 2, α0.3 | α0.6 | α1.0 |
 |---|---|---|---|---|---|---|---|
-| success | **100%** | 96% | 71% | 29% | 54% | 8% | 4% |
-| steps (success) | 447 | 453 | 505 | 588 | 755 | 961 | 1039 |
+| success | **100%** | 100% | 91% | 46% | 100% | 96% | 50% |
+| steps (success) | 455 | 482 | 573 | 686 | 595 | 828 | 1021 |
 
-- **Solves the clean field on every episode** (100%, ~447 steps).
-- **Degrades under turbulence:** down to 4–8% at the hardest dynamic-plume noise.
-- The casting rule is fixed — the same heuristic in every environment.
+- **Solves the clean field on every episode** (100%, ~455 steps).
+- **Degrades under turbulence:** down to ~46–50% at the hardest noise (α1.0), with steps-to-source roughly doubling.
+- Fixed rule, no learning — the same gradient-following in every environment.
 
 ## Policy: GRU recurrent network
 

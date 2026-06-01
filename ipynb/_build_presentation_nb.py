@@ -272,8 +272,6 @@ ax.plot(ev_x, _smooth(ev_y), color=BLUE, lw=3.0)
 ax.set_xlabel('Steps (M)'); ax.set_ylim(-0.02, 1.02); ax.set_title('Success ratio')
 for b in (1.5, 2.0):
     ax.axvline(b, color='gray', ls='--', lw=1.2)
-for cx, name in ((0.75, 'phase 0'), (1.75, 'phase 1'), (2.25, 'phase 2')):
-    ax.text(cx, 1.04, name, ha='center', va='bottom', color='dimgray')
 fig.tight_layout()
 fig.savefig(os.path.join(ASSETS, 'slide4_training_curves.png'), dpi=150)
 display(fig); plt.close(fig)
