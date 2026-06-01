@@ -99,8 +99,8 @@ apply_style()"""))
 # ============================== BASELINE ==============================
 cells.append(md("""# Baseline (sensor-only chemotaxis — no model)
 
-A purely computational controller: bilateral-gradient steering + stop/go +
-active sensing (head sweep while stopped). No network, nothing to load."""))
+A purely computational controller: bilateral-gradient steering + stop/go. The
+head never moves (no active sensing). No network, nothing to load."""))
 
 cells.append(code("""import numpy as np
 from src.envs.osl_env import EnvConfig, OslEnv
@@ -110,37 +110,23 @@ ENV_KW = dict(sensor_spacing_mm=0.15, episode_seconds=120.0,
               source_x_mm=40.0, source_y_mm=100.0,
               gaussian_sigma_mm=30.0, success_radius_mm=7.5)
 STEER_GAIN = 80.0          # tanh(STEER_GAIN*asym): soft sign() on the bilateral asym
-AS_HEAD_OMEGA = 1.0        # head-sweep amplitude while active-sensing
-AS_HALF_PERIOD = 6         # steps before flipping sweep direction
 
 
 class MinimalController:
-    \"\"\"Bilateral gradient steering + stop/go + head-sweep active sensing.\"\"\"
-    def __init__(self, steer_gain=STEER_GAIN, as_head_omega=AS_HEAD_OMEGA,
-                 as_half_period=AS_HALF_PERIOD):
+    \"\"\"Bilateral gradient steering + stop/go. Head never moves (active sensing off).\"\"\"
+    def __init__(self, steer_gain=STEER_GAIN):
         self.steer_gain = steer_gain
-        self.as_head_omega = as_head_omega
-        self.as_half_period = as_half_period
         self.reset()
 
     def reset(self):
-        self._sweep_dir = 1.0
-        self._sweep_phase = 0
+        pass
 
     def act(self, obs):
         c_left, c_right, dlog = float(obs[0]), float(obs[1]), float(obs[2])
         asym = (c_left - c_right) / (c_left + c_right + 1e-9)
         body_omega = float(np.tanh(self.steer_gain * asym))   # steer to stronger antenna
-        if dlog >= 0.0:                                        # rising → go
-            self._sweep_phase = 0
-            return np.asarray([1.0, body_omega, 0.0], dtype=np.float32)
-        # falling → stop and sweep the head (active sensing)
-        self._sweep_phase += 1
-        if self._sweep_phase >= self.as_half_period:
-            self._sweep_phase = 0
-            self._sweep_dir *= -1.0
-        head_omega = float(np.clip(self._sweep_dir * self.as_head_omega, -1.0, 1.0))
-        return np.asarray([-1.0, body_omega, head_omega], dtype=np.float32)
+        v_action = 1.0 if dlog >= 0.0 else -1.0               # rising → go, falling → stop
+        return np.asarray([v_action, body_omega, 0.0], dtype=np.float32)
 
 
 def make_env(stage, strength, seed):
@@ -165,7 +151,7 @@ def run_episode(env, controller, seed, collect_traj=False, render_fn=None):
                 ax_.append(env.x_mm); ay_.append(env.y_mm)
         if collect_traj and render_fn is not None:
             frames.append(render_fn(env, tx, ty, ax_, ay_, t,
-                                    title=f'baseline seed={seed} step={t} AS={as_steps}'))
+                                    title=f'baseline seed={seed} step={t}'))
         if term or trunc:
             success = bool(info.get('success', False)); break
     return {'seed': seed, 'return': ret, 'success': success, 'steps': t + 1,
