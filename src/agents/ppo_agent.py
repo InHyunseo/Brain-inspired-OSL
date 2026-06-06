@@ -33,7 +33,16 @@ class PPOConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
-    entropy_coef: float = 0.005
+    # Raised 0.005 -> 0.01 to keep the action distribution from collapsing onto
+    # one trajectory mode early (the on-policy self-reinforcement failure: a
+    # chance high-return turning trajectory gets amplified each update until the
+    # policy spins). More exploration pressure resists that mode collapse.
+    entropy_coef: float = 0.01
+    # Early-stop the update epochs once the mean approx-KL between the old and
+    # new policy exceeds this. Without it all `update_epochs` run unconditionally,
+    # so a single rollout can push the distribution arbitrarily far in one
+    # direction — the direct lever on the self-reinforcement loop. None = off.
+    target_kl: float | None = 0.02
     value_loss_coef: float = 0.5
     normalize_advantages: bool = True
     clip_value_loss: bool = True
@@ -74,6 +83,7 @@ class RolloutBuffer:
         obs_dim: int,
         action_dim: int,
         actor_state_dim: int,
+        critic_state_dim: int,
         device: torch.device,
     ):
         self.rollout_steps = rollout_steps
@@ -87,9 +97,13 @@ class RolloutBuffer:
         self.returns = torch.zeros(rollout_steps, num_envs, 1, device=device)
         self.advantages = torch.zeros(rollout_steps, num_envs, 1, device=device)
         self.initial_actor_states = torch.zeros(num_envs, actor_state_dim, device=device)
+        self.initial_critic_states = torch.zeros(num_envs, critic_state_dim, device=device)
 
-    def begin_rollout(self, actor_states: torch.Tensor) -> None:
+    def begin_rollout(
+        self, actor_states: torch.Tensor, critic_states: torch.Tensor
+    ) -> None:
         self.initial_actor_states = actor_states.clone()
+        self.initial_critic_states = critic_states.clone()
 
     def insert(self, step, obs, mask, action, log_prob, reward, value):
         self.obs[step].copy_(obs)
@@ -122,6 +136,7 @@ class RolloutBuffer:
                 "returns": self.returns[:, env_ids],
                 "advantages": self.advantages[:, env_ids],
                 "actor_state0": self.initial_actor_states[env_ids],
+                "critic_state0": self.initial_critic_states[env_ids],
             }
 
 
@@ -169,6 +184,7 @@ class PPOTrainer:
             obs_dim=obs_dim,
             action_dim=action_dim,
             actor_state_dim=self.policy.actor_state_size,
+            critic_state_dim=self.policy.critic_state_size,
             device=self.device,
         )
 
@@ -284,7 +300,9 @@ class PPOTrainer:
             f"| casts {payload.get('recent_cast_mean', 0.0):.1f} "
             f"| actor {payload['actor_loss']:.4f} "
             f"| critic {payload['critic_loss']:.4f} "
-            f"| ent {payload['entropy']:.4f}"
+            f"| ent {payload['entropy']:.4f} "
+            f"| kl {payload.get('approx_kl', 0.0):.4f} "
+            f"| ep {payload.get('epochs_run', 0)}"
         )
 
     def _ensure_rollout_state(self) -> None:
@@ -342,16 +360,23 @@ class PPOTrainer:
             adv_std = advantages.std().clamp_min(1e-6)
             self.buffer.advantages = (advantages - adv_mean) / adv_std
         actor_losses, critic_losses, entropies = [], [], []
+        approx_kls: list[float] = []
+        epochs_run = 0
         for _ in range(self.cfg.update_epochs):
+            epoch_kls: list[float] = []
             for batch in self.buffer.iter_minibatches(self.cfg.minibatch_envs):
                 values, log_probs, entropy = self.policy.evaluate_actions_sequence(
                     obs_seq=batch["obs"],
                     mask_seq=batch["masks"],
                     action_seq=batch["actions"],
                     actor_state0=batch["actor_state0"],
-                    critic_state0=torch.zeros(batch["actor_state0"].shape[0], 0, device=self.device),
+                    critic_state0=batch["critic_state0"],
                 )
-                ratio = torch.exp(log_probs - batch["log_probs"])
+                logratio = log_probs - batch["log_probs"]
+                ratio = torch.exp(logratio)
+                # Schulman k3 approx-KL: positive, low-variance KL(old||new) est.
+                with torch.no_grad():
+                    epoch_kls.append(float(((ratio - 1.0) - logratio).mean().cpu()))
                 surr1 = ratio * batch["advantages"]
                 surr2 = torch.clamp(ratio, 1.0 - self.cfg.clip_epsilon, 1.0 + self.cfg.clip_epsilon) * batch["advantages"]
                 actor_loss = -torch.min(surr1, surr2).mean() - self.cfg.entropy_coef * entropy.mean()
@@ -381,10 +406,20 @@ class PPOTrainer:
                 actor_losses.append(float(actor_loss.detach().cpu()))
                 critic_losses.append(float(critic_loss.detach().cpu()))
                 entropies.append(float(entropy.mean().detach().cpu()))
+
+            epochs_run += 1
+            epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else 0.0
+            approx_kls.append(epoch_kl)
+            # Stop further epochs once this rollout has moved the policy far
+            # enough — caps how hard one batch can reinforce a single mode.
+            if self.cfg.target_kl is not None and epoch_kl > self.cfg.target_kl:
+                break
         return {
             "actor_loss": float(np.mean(actor_losses)) if actor_losses else 0.0,
             "critic_loss": float(np.mean(critic_losses)) if critic_losses else 0.0,
             "entropy": float(np.mean(entropies)) if entropies else 0.0,
+            "approx_kl": float(approx_kls[-1]) if approx_kls else 0.0,
+            "epochs_run": epochs_run,
         }
 
     def train(self, phase_timesteps: int) -> dict[str, Any]:
@@ -403,7 +438,7 @@ class PPOTrainer:
         )
 
         while self._total_steps < phase_target:
-            self.buffer.begin_rollout(self._actor_state)
+            self.buffer.begin_rollout(self._actor_state, self._critic_state)
             for step in range(self.cfg.rollout_steps):
                 with torch.no_grad():
                     action, log_prob, value, next_actor_state, next_critic_state = self.policy.act(

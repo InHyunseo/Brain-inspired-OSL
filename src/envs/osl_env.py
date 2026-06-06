@@ -62,6 +62,14 @@ class EnvConfig:
     v_max_mm_s: float = 1.2
     body_omega_max_deg_s: float = 120.0
     head_omega_max_deg_s: float = 240.0
+    # Deadzone on raw body_omega: |raw| < this -> 0. A tiny body_omega bias
+    # (~0.05 -> 0.6 deg/step) integrates into a full circle over an episode, the
+    # 2nd-order cause of the "always turning" behaviour. Zeroing sub-threshold
+    # rotation lets straight runs stay straight while deliberate turns
+    # (raw ~0.2-1.0, 2.4-12 deg/step) pass untouched. Applied to body only;
+    # head_omega is left alone so active-sensing (casting) micro-oscillation is
+    # preserved. Set 0.0 to disable.
+    body_omega_deadzone: float = 0.05
     initial_head_relative_angle_rad: float = 0.0
     stop_threshold_mm_s: float = 0.08
     run_threshold_mm_s: float = 0.2
@@ -305,7 +313,17 @@ class OslEnv(gym.Env[np.ndarray, np.ndarray]):
         raw_v = float(np.clip(action[0], -1.0, 1.0))
         raw_body_omega = float(np.clip(action[1], -1.0, 1.0))
         raw_head_omega = float(np.clip(action[2], -1.0, 1.0))
-        v_mm_s = (raw_v + 1.0) * 0.5 * self.cfg.v_max_mm_s
+        # Deadzone: kill sub-threshold body rotation so a tiny mean bias does not
+        # integrate into a circular arc (see body_omega_deadzone in EnvConfig).
+        if abs(raw_body_omega) < self.cfg.body_omega_deadzone:
+            raw_body_omega = 0.0
+        # Rectified forward speed: raw_v <= 0 -> stop, raw_v > 0 -> forward.
+        # The old affine map (raw_v + 1) * 0.5 mapped the Gaussian-policy initial
+        # mean (raw_v ~ 0) to HALF v_max, i.e. "always cruising forward", so any
+        # small body_omega bias integrated into a circular arc instead of a
+        # straight run. Centering 0 on STOP makes straight-or-stop the default
+        # and removes that turning bias at its root.
+        v_mm_s = max(0.0, raw_v) * self.cfg.v_max_mm_s
         body_omega_rad_s = math.radians(self.cfg.body_omega_max_deg_s) * raw_body_omega
         head_omega_rad_s = math.radians(self.cfg.head_omega_max_deg_s) * raw_head_omega
 

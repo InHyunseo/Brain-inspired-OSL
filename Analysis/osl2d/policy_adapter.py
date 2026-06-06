@@ -64,7 +64,18 @@ def _build_policy_from_ckpt(ckpt_path: str | Path, device: torch.device):
         from src.models.policy import Policy
         policy = Policy(log_std_init=float(cfg.get("log_std_init", -0.5)), **common)
         agent_type = "ppo"
-    policy.load_state_dict(state)
+    # Legacy PPO checkpoints carry a stateless MLP critic (`critic.0.*`); the
+    # critic is now a recurrent GRU (`critic.cell.*`/`critic.value_head.*`). The
+    # critic is discarded for analysis, so tolerate a critic mismatch and only
+    # require the actor (backbone/head) weights to load.
+    missing, unexpected = policy.load_state_dict(state, strict=False)
+    non_critic_missing = [k for k in missing if not k.startswith("critic.")]
+    non_critic_unexpected = [k for k in unexpected if not k.startswith("critic.")]
+    if non_critic_missing or non_critic_unexpected:
+        raise RuntimeError(
+            f"Non-critic state mismatch loading {ckpt_path}: "
+            f"missing={non_critic_missing} unexpected={non_critic_unexpected}"
+        )
     policy.to(device)
     policy.eval()
     return policy, agent_type

@@ -8,7 +8,11 @@ Actor backbone is selectable via `backbone=`:
 - ``"gru"`` — `GRUBackbone` consumes the full 6-D obs; its hidden state is the
   latent and the head consumes it directly (no re-concat).
 
-Critic: stateless MLP over the full 6-D obs producing a scalar value.
+Critic: recurrent — a single `nn.GRUCell` over the full 6-D obs followed by a
+Linear value head. The critic is a separate parallel network (it does NOT share
+the actor backbone), so the same GRU critic is used regardless of the actor
+backbone, keeping connectome-vs-GRU comparisons fair. The critic is discarded at
+deployment; only the actor backbone is the "biological" model.
 
 Sequence operations follow the convention: tensors are `(T, B, D)` for both
 `obs_seq` and `mask_seq`; states are `(B, state_size)` carried across env steps
@@ -56,6 +60,41 @@ def remap_legacy_backbone_keys(state: dict) -> dict:
     }
 
 
+class CriticGRU(nn.Module):
+    """Recurrent value network: a single GRUCell over obs + a Linear value head.
+
+    Parallel to (not sharing) the actor backbone. Mirrors the backbone's
+    step/sequence interface so the policy can carry a critic hidden state the
+    same way it carries the actor state (zeroed at episode boundaries via mask).
+    """
+
+    def __init__(self, obs_dim: int, hidden: int):
+        super().__init__()
+        self.hidden = int(hidden)
+        self.cell = nn.GRUCell(input_size=int(obs_dim), hidden_size=self.hidden)
+        self.value_head = nn.Linear(self.hidden, 1)
+        self.state_size = self.hidden
+
+    def initial_state(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        return torch.zeros(batch_size, self.state_size, device=device)
+
+    def forward_step(
+        self, obs: torch.Tensor, state: torch.Tensor, mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        h_next = self.cell(obs, state * mask)
+        return self.value_head(h_next), h_next
+
+    def forward_sequence(
+        self, obs_seq: torch.Tensor, state0: torch.Tensor, mask_seq: torch.Tensor
+    ) -> torch.Tensor:
+        state = state0
+        values = []
+        for step in range(obs_seq.shape[0]):
+            value, state = self.forward_step(obs_seq[step], state, mask_seq[step])
+            values.append(value)
+        return torch.stack(values, dim=0)
+
+
 class Policy(nn.Module):
     def __init__(
         self,
@@ -92,17 +131,14 @@ class Policy(nn.Module):
         self.actor_mean = nn.Linear(head_in_dim, ACTION_DIM)
         self.actor_log_std = nn.Parameter(torch.full((ACTION_DIM,), float(log_std_init)))
 
-        critic_layers: list[nn.Module] = []
-        last = OBS_DIM
-        for h in critic_hidden:
-            critic_layers.append(nn.Linear(last, h))
-            critic_layers.append(nn.Tanh())
-            last = h
-        critic_layers.append(nn.Linear(last, 1))
-        self.critic = nn.Sequential(*critic_layers)
+        # Recurrent critic: a separate GRU over the full obs. critic_hidden is a
+        # tuple for legacy MLP configs; the GRU uses its first entry as the
+        # hidden width (same param so existing configs need no change).
+        critic_gru_hidden = int(critic_hidden[0]) if critic_hidden else 64
+        self.critic = CriticGRU(obs_dim=OBS_DIM, hidden=critic_gru_hidden)
 
         self.actor_state_size = self.backbone.state_size
-        self.critic_state_size = 0  # critic is stateless; placeholder kept for buffer/runner symmetry
+        self.critic_state_size = self.critic.state_size
 
     @property
     def group_indices(self) -> dict[str, list[int]]:
@@ -133,7 +169,7 @@ class Policy(nn.Module):
         self, batch_size: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor]:
         actor_state = self.backbone.initial_state(batch_size, device)
-        critic_state = torch.zeros(batch_size, 0, device=device)
+        critic_state = self.critic.initial_state(batch_size, device)
         return actor_state, critic_state
 
     def _actor_distribution(
@@ -163,13 +199,13 @@ class Policy(nn.Module):
         dist, next_actor_state = self._actor_distribution(obs, actor_state, mask, patch=patch)
         action = dist.mean if deterministic else dist.sample()
         log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
-        value = self.critic(obs)
-        return action, log_prob, value, next_actor_state, critic_state
+        value, next_critic_state = self.critic.forward_step(obs, critic_state, mask)
+        return action, log_prob, value, next_actor_state, next_critic_state
 
     def predict_value(
         self, obs: torch.Tensor, critic_state: torch.Tensor, mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.critic(obs), critic_state
+        return self.critic.forward_step(obs, critic_state, mask)
 
     def evaluate_actions_sequence(
         self,
@@ -187,17 +223,19 @@ class Policy(nn.Module):
         steps, batch = obs_seq.shape[:2]
         flat_head_in = head_in_seq.reshape(steps * batch, -1)
         flat_actions = action_seq.reshape(steps * batch, -1)
-        flat_obs = obs_seq.reshape(steps * batch, -1)
 
         mean = self.actor_mean(flat_head_in)
         std = self.actor_log_std.exp().expand_as(mean)
         dist = Normal(mean, std)
         log_prob = dist.log_prob(flat_actions).sum(dim=-1, keepdim=True)
         entropy = dist.entropy().sum(dim=-1, keepdim=True)
-        values = self.critic(flat_obs)
+
+        # Critic is recurrent: roll the GRU through the sequence from its stored
+        # initial hidden state, zeroing at episode boundaries via mask_seq.
+        values = self.critic.forward_sequence(obs_seq, critic_state0, mask_seq)
 
         return (
-            values.reshape(steps, batch, 1),
+            values,
             log_prob.reshape(steps, batch, 1),
             entropy.reshape(steps, batch, 1),
         )
