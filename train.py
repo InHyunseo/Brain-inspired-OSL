@@ -1,11 +1,9 @@
-"""Unified training entry. Branches on --agent-type {ppo, sac}.
+"""PPO training entry.
 
-Both agents share the same parallel env runner, curriculum loop, connectome
-backbone, logging, checkpointing, and eval. The only difference is the
-optimisation algorithm: PPO (on-policy, clipped surrogate) vs SAC (off-policy,
-twin Q + auto-α).
+Drives the connectome / GRU policy with a custom on-policy PPO (clipped
+surrogate) over the parallel env runner and a noise/success-radius curriculum.
 
-Outputs land under runs/{agent}_{run_name}_{timestamp}/.
+Outputs land under runs/ppo_{run_name}_{timestamp}/.
 """
 from __future__ import annotations
 
@@ -16,7 +14,7 @@ import time
 import torch
 
 from src.utils.config import build_parser, parse_curriculum_phases
-from src.utils.factory import make_ppo_trainer, make_sac_trainer
+from src.utils.factory import make_ppo_trainer
 from src.utils.seed import set_global_seed
 
 
@@ -44,7 +42,7 @@ def _device(args):
 
 
 def _train_curriculum(trainer, phases, agent_label: str) -> None:
-    """Drive curriculum via runner.set_noise_stage. Shared by PPO and SAC."""
+    """Drive the curriculum via runner.set_noise_stage."""
     summary = {}
     try:
         for i, (stage, strength, steps) in enumerate(phases):
@@ -65,14 +63,6 @@ def train_ppo(args, run_dir):
     _train_curriculum(trainer, phases, agent_label="PPO")
 
 
-def train_sac(args, run_dir):
-    phases = parse_curriculum_phases(args)
-    if not phases:
-        raise ValueError("No curriculum phases specified.")
-    trainer = make_sac_trainer(args, run_dir=run_dir)
-    _train_curriculum(trainer, phases, agent_label="SAC")
-
-
 def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.episodes is not None:
@@ -83,12 +73,7 @@ def main(argv=None):
     _dump_config(run_dir, args)
     print(f"[run_dir] {run_dir}")
 
-    if args.agent_type == "ppo":
-        train_ppo(args, run_dir)
-    elif args.agent_type == "sac":
-        train_sac(args, run_dir)
-    else:
-        raise ValueError(f"Unsupported agent_type: {args.agent_type}")
+    train_ppo(args, run_dir)
 
     print(f"\n[done] artifacts saved to {run_dir}")
     return run_dir

@@ -1,58 +1,99 @@
-# Odor Source Localization (Larva Connectome RL)
+# OSL — Odor Source Localization with a Larva-Inspired RL Agent
 
-Bilateral-sensor odor source localization with an independent head/body rotation
-axis and a 387-node *Drosophila* larva connectome as the actor backbone.
-Both PPO and SAC are first-class trainers and share the same env, parallel
-runner, curriculum loop, connectome model, logging, checkpoint, and eval code —
-only the optimisation algorithm differs.
+A bio-inspired reinforcement-learning study of **odor source localization (OSL)**:
+reach an unseen odor source from local concentration alone, using two ideas
+borrowed from *Drosophila* larva chemotaxis —
 
-## Project Goals
+- **active sensing** — an independent head axis (`head_omega`) so head-casting can
+  emerge as a learned behavior, and
+- a **connectome backbone** — the real ~387-node larva connectivity graph used as
+  the policy's recurrent actor (vs. a plain GRU as the capacity reference).
 
-- Bilateral plume sensing with biologically realistic 0.15 mm sensor spacing
-- Independent head-axis control (head casting via continuous `head_omega`)
-- Real larva connectome as the actor (CSV-driven message passing, ~17k learnable edges)
-- Efference copy in observation so the policy can disentangle self-motion from plume change
-- Bump-field odor noise model that interpolates from clean Gaussian to
-  hydrodynamic-feeling turbulence via a single α ∈ [0, 1] curriculum scalar
+The task is a POMDP: only the current bilateral concentration is observed, so
+direction must be integrated over time. Plumes range from a clean Gaussian field
+to a bump-field "turbulence" via a single curriculum scalar α ∈ [0, 1].
 
-## Code Structure
+## What was done / results
 
-### Environment (`src/envs/`)
+- **Hand-built baseline (no network).** Bilateral gradient steering solves the
+  clean Gaussian field every time (100%, ~455 steps) and degrades gracefully
+  under noise (~46–50% at the hardest α=1.0). It is the bar any learned policy
+  must clear, and no RL agent here beats it on the clean Gaussian.
+- **PPO + GRU policy.** Learns the clean field (~100% eval success). Crucially,
+  **cast / active-sensing rises with noise** — the same trend the baseline shows
+  by hand-coded rule, here emerging from learning alone. Note: the policy only
+  solves the task with **stochastic** rollouts; deterministic (mean) actions give
+  ~0%, so all analysis uses stochastic rollouts.
+- **Connectome backbone (negative result).** Swapping the GRU for the real larva
+  connectome (~17.5K learnable edge scalars, ~1/30 the GRU's parameters) fails to
+  train end-to-end — the biological sparsity that saves parameters appears to
+  cost trainability/capacity. Scaling it up does train; the limit was capacity,
+  not the wiring.
+- **Mechanistic analysis** (`analysis/osl2d/`) on the GRU hidden state: behavior
+  labeling → linear probing → Jacobian eigenmodes → causal ablation. Active
+  sensing shows oscillatory dynamics where RUN does not, and the neurons carrying
+  it are reassigned as the noise level changes.
 
-- `osl_env.py` — `OslEnv` + `EnvConfig`. Observation `[c_left, c_right, prev_v, prev_body_omega, prev_head_omega]` (5,). Action `Box([v, body_omega, head_omega])` in [-1, 1] (3,). Head and body rotate on independent axes; sensor positions track `heading + head_relative_angle`. Spawn policy: rejection-sampled annulus around the source (cue zone ∩ `[r_min, r_max]`); heading initialised toward the source with Gaussian error.
-- `geometry.py` — `wrap_angle`, `sensor_positions(x, y, heading, spacing)`.
-- `odor_field.py` — `GaussianOdorField` with a bump-field perturbation model: many independent local Gaussian bumps with signed amplitudes, drifting and AR(1)-modulated. Stage 0 = clean. Stage 1 = static bumps (frozen at reset). Stage 2 = dynamic bumps (advance per env step). One scalar α scales every bump parameter (count, amplitude, drift speed, lifecycle rate, respawn probability). Per-bump sigma is capped near the source so the global plume gradient is preserved at full α.
-- `events.py` — `classify_event(...)` → run / stop / low_sweep / high_cast_like / turn_like / spin_like flags.
-- `parallel_runner.py` — `ParallelRunner` (subprocess fork pipe) and `VectorRunner` (in-process). Both expose `set_noise_stage(stage, strength)` for in-place curriculum advancement.
+## Folder structure
 
-### Networks (`src/models/`)
+```
+OSL/
+├── README.md            # this file — project overview, results, run commands
+├── requirements.txt     # pure PyTorch + numpy + gymnasium + matplotlib (no sb3)
+├── train.py eval.py main.py   # PPO entry points (train / eval / both)
+├── visualize_curriculum_field.py   # render per-phase odor-field PNG + GIF
+├── assets/connectome/   # weights.csv, metadata.csv (the larva connectivity graph)
+├── src/                 # the library — env, models, PPO agent, baseline, utils
+│   └── README.md        # subpackage map + import graph
+├── analysis/            # mechanistic analysis pipeline on trained policies
+│   ├── README.md        # pipeline overview
+│   ├── methodology.md   # the 3-phase methodology
+│   ├── METHODS_MATH.md  # per-phase equations
+│   └── osl2d/           # collect → label → probe → Jacobian → ablation
+├── notebooks/           # Colab-friendly end-to-end notebooks
+│   └── README.md
+└── demo/                # legacy RL practice / analysis-plumbing sanity checks
+    └── README.md
+```
 
-- `connectome.py` — `Connectome` branch. Loads a sparse 387-node connectivity matrix + ORN/MBON metadata, augments with 2 sensor input nodes (left/right ORN fan-out) and `latent_dim` output nodes (MBON fan-in). Each env step runs `message_passing_steps=6` synchronous tanh updates with sensor re-injection. Edge weights are learnable scalars (~17k).
-- `policy.py` — `Policy` (PPO). Actor = `Connectome` (consumes `obs[:, 0:2]`) → latent concat with efference copy `obs[:, 2:5]` → Linear → tanh-Gaussian over the 3-D action. Critic = stateless 2-layer MLP `V(s)`. `evaluate_actions_sequence(...)` for PPO sequence updates.
-- `networks.py` — legacy SAC backbones (`GRUActor`, `MLPActor`, `ConnectomeActor` + `QCritic`) kept for reference.
+## Setup
 
-### Agents (`src/agents/`)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-- `ppo_agent.py` — `PPOTrainer` + `PPOConfig` + `RolloutBuffer`. Custom on-policy PPO with separate actor/critic optimizers, GAE, sequence-based update via `evaluate_actions_sequence`. Persistent rollout state across phases — `train(phase_timesteps=...)` can be called repeatedly to advance a curriculum.
-- `sac_agent.py` — `SACTrainer` + `SACConfig` + `SACPolicy` + `ReplayBuffer`. Off-policy SAC with twin Q critics + Polyak-averaged targets + auto-tuned entropy temperature α. Reuses `parallel_runner`, the connectome actor, and the same curriculum surface as PPO (`trainer.runner.set_noise_stage(...)` then `trainer.train(phase_timesteps=...)`).
+Connectome CSVs must live at `assets/connectome/weights.csv` and
+`assets/connectome/metadata.csv` (override with `--weights-csv` / `--metadata-csv`).
 
-## Connectome (`Connectome` branch)
+## Run
 
-- 387 base neurons (sensory / PN / LN / KC / MBON) + 2 sensor input nodes + `latent_dim` (32) output nodes
-- Augmented connectivity: original edges (where weight > 0) ∪ left-sensor → left ORN ∪ right-sensor → right ORN ∪ MBON → output
-- Per env step: 6 inner iterations of `inject_sensors → aggregate_messages + bias → tanh → re-inject_sensors`
-- ~17k learnable edge scalars + 423 node biases
+```bash
+# Train (PPO; default noise curriculum). Outputs land in runs/ppo_main_*/
+python3 train.py --backbone gru          # GRU backbone (the working reference)
+python3 train.py --backbone connectome   # connectome backbone
 
-## Entry Points
+# Short smoke run
+python3 train.py --curriculum-phases '[[0,0.0,50000]]' --num-envs 4 --no-parallel-envs
 
-- `train.py` — `--agent-type {ppo, sac}`. Curriculum from `--curriculum-phases` JSON.
-- `eval.py` — same flag, `--run-dir` required, deterministic rollouts + best-episode GIF.
-- `main.py` — train + eval back-to-back.
-- `visualize_curriculum_field.py` — render per-phase odor-field snapshot PNG + dynamic GIF (env stepping at rest).
-- `ipynb/PPO_framework.ipynb` — Colab / local end-to-end PPO (clone → smoke → curriculum train → curves → curriculum-field viz → elite-seed eval + GIF).
-- `ipynb/SAC_framework.ipynb` — same surface as the PPO notebook with the SAC trainer + auto-α / Q-mean curves.
-- `ipynb/DRQN_framework.ipynb` — legacy DRQN/DQN demo on the old single-sensor env (`demo/DRQN/`).
+# Eval a finished run (deterministic rollouts + best-episode GIF)
+python3 eval.py --run-dir runs/ppo_main_YYYYMMDD_HHMMSS \
+  --eval-noise-stage 1 --eval-noise-strength 0.5 --eval-episodes 50
 
-## Reference
+# Train + eval back-to-back
+python3 main.py
+```
 
-Run commands and CLI flags: `MANUAL.md`. Methodology and analysis plan: `analysis.md`.
+Key flags: `--backbone {gru, connectome}`, `--gru-hidden` (421),
+`--curriculum-phases` (JSON list of `[noise_stage, noise_strength, timesteps]`),
+`--message-passing-steps` (6), `--latent-dim` (32), `--seed`, `--force-cpu`.
+The env is a 6-D observation `[c_left, c_right, dlog, prev_v, prev_body_ω,
+prev_head_ω]` and a 3-D action `[v, body_ω, head_ω]` in [-1, 1]; see
+[`src/README.md`](src/README.md) for the full env API.
+
+## Analysis
+
+After a run finishes, the mechanistic pipeline reads its checkpoint + dumped
+traces; see [`analysis/README.md`](analysis/README.md).

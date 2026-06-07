@@ -1,7 +1,5 @@
-"""Unified eval entry. Branches on the agent_type recorded in run_dir/config.json.
-
-PPO : load Policy from ckpt_final.pt, run deterministic rollouts, render GIF.
-SAC : load SACPolicy, run deterministic rollouts, render GIF of best episode.
+"""Eval entry: load Policy from ckpt_final.pt, run deterministic rollouts,
+render the best-return episode as a GIF.
 """
 from __future__ import annotations
 
@@ -165,112 +163,6 @@ def _render_ppo_gif(policy, device, args, seed, gif_path):
 
 
 # ---------------------------------------------------------------------------
-# SAC eval
-# ---------------------------------------------------------------------------
-
-
-def eval_sac(args, run_dir):
-    from src.agents.sac_agent import SACConfig, SACPolicy
-
-    ckpt_path = args.ckpt or os.path.join(run_dir, "ckpt_final.pt")
-    if not os.path.exists(ckpt_path):
-        ckpt_path = os.path.join(run_dir, "checkpoints", "ckpt_final.pt")
-    if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"No SAC checkpoint at {ckpt_path}.")
-    print(f"[eval] loading {ckpt_path}")
-
-    payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    cfg = SACConfig(**payload["agent_config"])
-    device = _device(args)
-    policy = SACPolicy(
-        weights_csv=cfg.weights_csv,
-        metadata_csv=cfg.metadata_csv,
-        latent_dim=cfg.latent_dim,
-        message_passing_steps=cfg.message_passing_steps,
-        critic_hidden=cfg.critic_hidden,
-        log_std_init=cfg.log_std_init,
-        log_std_min=cfg.log_std_min,
-        log_std_max=cfg.log_std_max,
-        backbone=cfg.backbone,
-        gru_hidden=cfg.gru_hidden,
-    ).to(device)
-    policy.load_state_dict(remap_legacy_backbone_keys(payload["policy_state_dict"]))
-    policy.eval()
-
-    env = _build_eval_env(args)
-    rets, succ = [], []
-    best_seed, best_ret = None, -float("inf")
-
-    for i in range(args.eval_episodes):
-        seed = args.seed_base + i
-        obs, _ = env.reset(seed=seed)
-        actor_state, critic_state = policy.initial_states(1, device)
-        mask = torch.zeros(1, 1, device=device)
-        ep_ret, success = 0.0, False
-        while True:
-            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-            with torch.no_grad():
-                action, _, next_actor_state, next_critic_state = policy.act(
-                    obs_t, actor_state, critic_state, mask, deterministic=True
-                )
-            obs, r, terminated, truncated, info = env.step(action.squeeze(0).cpu().numpy())
-            ep_ret += float(r)
-            done = bool(terminated or truncated)
-            if done:
-                success = bool(info.get("success", False))
-            mask.fill_(0.0 if done else 1.0)
-            actor_state = next_actor_state * mask
-            critic_state = next_critic_state * mask
-            if done:
-                break
-
-        rets.append(ep_ret)
-        succ.append(float(success))
-        if ep_ret > best_ret:
-            best_ret, best_seed = ep_ret, seed
-
-    print(f"[eval] success_rate={np.mean(succ):.3f}  avg_return={np.mean(rets):.2f}  episodes={len(rets)}")
-
-    if args.save_gif and best_seed is not None:
-        gif_path = os.path.join(run_dir, "plots", "best_agent.gif")
-        _render_sac_gif(policy, device, args, best_seed, gif_path)
-
-
-def _render_sac_gif(policy, device, args, seed, gif_path):
-    env = _build_eval_env(args)
-    obs, _ = env.reset(seed=seed)
-    actor_state, critic_state = policy.initial_states(1, device)
-    mask = torch.zeros(1, 1, device=device)
-
-    frames, traj_x, traj_y, cast_x, cast_y = [], [], [], [], []
-    print(f"[eval] rendering GIF for seed {seed}")
-    for t in range(env.max_steps):
-        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-        with torch.no_grad():
-            action, _, next_actor_state, next_critic_state = policy.act(
-                obs_t, actor_state, critic_state, mask, deterministic=True
-            )
-        traj_x.append(env.x_mm)
-        traj_y.append(env.y_mm)
-        obs, _, terminated, truncated, info = env.step(action.squeeze(0).cpu().numpy())
-        if info.get("event_is_high_cast_like"):
-            cast_x.append(env.x_mm)
-            cast_y.append(env.y_mm)
-        frames.append(render_rollout_frame(
-            env, traj_x, traj_y, cast_x, cast_y, t,
-            title=f"SAC seed={seed} step={t}",
-        ))
-        done = bool(terminated or truncated)
-        mask.fill_(0.0 if done else 1.0)
-        actor_state = next_actor_state * mask
-        critic_state = next_critic_state * mask
-        if done:
-            break
-
-    save_gif(frames, gif_path, fps=15)
-
-
-# ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
 
@@ -286,12 +178,7 @@ def main(argv=None):
     args = _apply_conf_overrides(args, conf)
     set_global_seed(args.seed)
 
-    if args.agent_type == "ppo":
-        eval_ppo(args, args.run_dir)
-    elif args.agent_type == "sac":
-        eval_sac(args, args.run_dir)
-    else:
-        raise ValueError(f"Unsupported agent_type: {args.agent_type}")
+    eval_ppo(args, args.run_dir)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,7 @@
 """CLI argument parser for train.py / eval.py / main.py.
 
-Two agent tracks share this parser: PPO (custom on-policy with separate
-actor/critic, larva connectome actor) and RSAC (off-policy episode loop with
-selectable backbone for ablations). Each uses only the subset of flags
-relevant to it.
+PPO (custom on-policy, separate actor/critic) over a selectable backbone
+(larva connectome or GRU).
 """
 from __future__ import annotations
 
@@ -36,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-cpu", action="store_true")
 
     # Agent
-    p.add_argument("--agent-type", choices=["ppo", "sac"], default="ppo")
+    p.add_argument("--agent-type", choices=["ppo"], default="ppo")
 
     # Env (shared)
     p.add_argument("--sensor-spacing-mm", type=float, default=0.15)
@@ -108,24 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checkpoint-every-timesteps", type=int, default=100_000)
     p.add_argument("--parallel-envs", action=argparse.BooleanOptionalAction, default=True)
 
-    # SAC (shares PPO's --curriculum-phases, --num-envs, --parallel-envs,
-    # --actor-lr/--critic-lr, --actor-max-grad-norm/--critic-max-grad-norm,
-    # --gamma, --log-std-init, --latent-dim, --message-passing-steps, --weights-csv,
-    # --metadata-csv, --eval-interval-updates, --eval-episodes-during-train,
-    # --log-every-updates, --checkpoint-every-timesteps).
-    p.add_argument("--sac-rollout-steps", type=int, default=32,
-                   help="Env steps per env collected between SAC update cycles.")
-    p.add_argument("--sac-gradient-steps", type=int, default=32,
-                   help="SAC minibatch updates per rollout cycle.")
-    p.add_argument("--sac-batch-size", type=int, default=256)
-    p.add_argument("--sac-buffer-capacity", type=int, default=200_000)
-    p.add_argument("--sac-learning-starts-steps", type=int, default=5000)
-    p.add_argument("--sac-tau", type=float, default=0.005,
-                   help="Polyak rate for target-Q soft update.")
-    p.add_argument("--sac-alpha-lr", type=float, default=3e-4,
-                   help="Learning rate for the entropy temperature α.")
-
-    # Eval (shared)
+    # Eval
     p.add_argument("--eval-episodes", type=int, default=100)
     p.add_argument("--seed-base", type=int, default=20000)
     p.add_argument("--ckpt", type=str, default=None)

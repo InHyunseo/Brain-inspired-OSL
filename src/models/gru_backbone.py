@@ -1,7 +1,7 @@
 """GRU actor backbone — a non-connectome alternative for the OSL policy.
 
-Mirrors the `Connectome` backbone interface so `Policy`/`SACPolicy` can swap
-backbones with a single `backbone=` flag:
+Mirrors the `Connectome` backbone interface so `Policy` can swap backbones
+with a single `backbone=` flag:
 
 - `forward_step(actor_in, state, mask, patch=None) -> (latent, next_state)`
 - `forward_sequence(seq, state0, mask_seq, patch=None) -> (latent_seq, state)`

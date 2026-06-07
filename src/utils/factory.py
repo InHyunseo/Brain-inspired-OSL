@@ -1,4 +1,4 @@
-"""Env + agent factories shared by ppo / sac entry points."""
+"""Env + agent factories for the PPO entry points."""
 from __future__ import annotations
 
 from typing import Any
@@ -79,41 +79,3 @@ def make_ppo_trainer(args, run_dir):
         device="cpu" if args.force_cpu else "auto",
     )
     return PPOTrainer(env_cfg, cfg, run_dir=run_dir)
-
-
-def make_sac_trainer(args, run_dir):
-    """Construct a SACTrainer. Curriculum is driven externally via runner.set_noise_stage,
-    identical to the PPO entry point — only the optimisation algorithm differs."""
-    from src.agents.sac_agent import SACConfig, SACTrainer
-
-    env_cfg = make_env_config_dict(args, noise_stage=0, noise_strength=0.0)
-    cfg = SACConfig(
-        rollout_steps=args.sac_rollout_steps,
-        num_envs=args.num_envs,
-        parallel_envs=args.parallel_envs,
-        gradient_steps=args.sac_gradient_steps,
-        batch_size=args.sac_batch_size,
-        learning_starts_steps=args.sac_learning_starts_steps,
-        gamma=args.gamma,
-        tau=args.sac_tau,
-        actor_lr=args.actor_lr,
-        critic_lr=args.critic_lr,
-        alpha_lr=args.sac_alpha_lr,
-        actor_max_grad_norm=args.actor_max_grad_norm,
-        critic_max_grad_norm=args.critic_max_grad_norm,
-        log_std_init=args.log_std_init,
-        backbone=args.backbone,
-        gru_hidden=args.gru_hidden,
-        buffer_capacity=args.sac_buffer_capacity,
-        latent_dim=args.latent_dim,
-        message_passing_steps=args.message_passing_steps,
-        weights_csv=args.weights_csv,
-        metadata_csv=args.metadata_csv,
-        eval_interval_updates=args.eval_interval_updates,
-        eval_episodes=args.eval_episodes_during_train,
-        log_every_updates=args.log_every_updates,
-        checkpoint_every_timesteps=args.checkpoint_every_timesteps,
-        seed=args.seed,
-        device="cpu" if args.force_cpu else "auto",
-    )
-    return SACTrainer(env_cfg, cfg, run_dir=run_dir)
