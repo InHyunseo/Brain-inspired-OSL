@@ -75,6 +75,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Actor backbone. 'gru' ignores the connectome CSVs.")
     p.add_argument("--gru-hidden", dest="gru_hidden", type=int, default=421,
                    help="GRU hidden size (used when --backbone=gru).")
+    p.add_argument("--critic-type", choices=["mlp", "recurrent"], default="recurrent",
+                   help="Value network type. 'mlp' is stateless; 'recurrent' uses a GRUCell.")
+    p.add_argument("--critic-hidden", default="64,64",
+                   help="Comma-separated critic hidden sizes. Recurrent critic uses the first value.")
     p.add_argument("--weights-csv", dest="weights_csv",
                    default="assets/connectome/weights.csv")
     p.add_argument("--metadata-csv", dest="metadata_csv",
@@ -116,6 +120,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--episodes", type=int, default=None, help="Alias for --eval-episodes")
 
     return p
+
+
+def parse_hidden_sizes(value) -> tuple[int, ...]:
+    """Parse an int/list/comma-separated value into hidden layer widths."""
+    if isinstance(value, int):
+        return (int(value),)
+    if isinstance(value, (list, tuple)):
+        return tuple(int(v) for v in value)
+    parts = [part.strip() for part in str(value).split(",")]
+    return tuple(int(part) for part in parts if part)
 
 
 def parse_curriculum_phases(args) -> list[tuple[int, float, int]]:

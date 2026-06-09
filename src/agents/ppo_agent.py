@@ -53,6 +53,8 @@ class PPOConfig:
     log_std_init: float = -0.5
     backbone: str = "connectome"       # "connectome" | "gru"
     gru_hidden: int = 421              # GRU hidden (≈ connectome's 423-node state, for scale parity)
+    critic_type: str = "recurrent"     # "mlp" | "recurrent"
+    critic_hidden: tuple[int, ...] = (64, 64)
     latent_dim: int = 32               # number of connectome output (MBON fan-in) nodes
     feature_dim: int = 8               # per-node feature channels D; capacity knob (D=8 ~140K params)
     message_passing_steps: int = 6
@@ -172,6 +174,8 @@ class PPOTrainer:
             log_std_init=cfg.log_std_init,
             backbone=cfg.backbone,
             gru_hidden=cfg.gru_hidden,
+            critic_type=cfg.critic_type,
+            critic_hidden=cfg.critic_hidden,
         ).to(self.device)
 
         self.actor_params = list(self.policy.actor_parameters())

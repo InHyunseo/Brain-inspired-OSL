@@ -47,6 +47,7 @@ def make_env(args, *, seed: int | None = None,
 def make_ppo_trainer(args, run_dir):
     """Construct a PPOTrainer. Curriculum is driven externally via runner.set_noise_stage."""
     from src.agents.ppo_agent import PPOConfig, PPOTrainer
+    from src.utils.config import parse_hidden_sizes
 
     env_cfg = make_env_config_dict(args, noise_stage=0, noise_strength=0.0)
     cfg = PPOConfig(
@@ -67,6 +68,8 @@ def make_ppo_trainer(args, run_dir):
         log_std_init=args.log_std_init,
         backbone=args.backbone,
         gru_hidden=args.gru_hidden,
+        critic_type=args.critic_type,
+        critic_hidden=parse_hidden_sizes(args.critic_hidden),
         latent_dim=args.latent_dim,
         message_passing_steps=args.message_passing_steps,
         weights_csv=args.weights_csv,

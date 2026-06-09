@@ -28,7 +28,7 @@ def _build_policy_from_ckpt(ckpt_path: str | Path, device: torch.device):
     Reads ``agent_config`` (which now carries ``backbone``/``gru_hidden``) and
     rebuilds the matching policy class, then loads weights.
     """
-    from src.models.policy import remap_legacy_backbone_keys
+    from src.models.policy import Policy, remap_legacy_backbone_keys
 
     payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg = dict(payload["agent_config"])
@@ -38,6 +38,9 @@ def _build_policy_from_ckpt(ckpt_path: str | Path, device: torch.device):
 
     backbone = cfg.get("backbone", "connectome")
     gru_hidden = int(cfg.get("gru_hidden", 421))
+    critic_type = cfg.get("critic_type")
+    if critic_type is None:
+        critic_type = "recurrent" if any(k.startswith("critic.cell.") for k in state) else "mlp"
     common = dict(
         weights_csv=cfg.get("weights_csv"),
         metadata_csv=cfg.get("metadata_csv"),
@@ -45,14 +48,14 @@ def _build_policy_from_ckpt(ckpt_path: str | Path, device: torch.device):
         message_passing_steps=int(cfg.get("message_passing_steps", 6)),
         backbone=backbone,
         gru_hidden=gru_hidden,
+        critic_type=critic_type,
+        critic_hidden=cfg.get("critic_hidden", (64, 64)),
     )
-    from src.models.policy import Policy
     policy = Policy(log_std_init=float(cfg.get("log_std_init", -0.5)), **common)
     agent_type = "ppo"
-    # Legacy PPO checkpoints carry a stateless MLP critic (`critic.0.*`); the
-    # critic is now a recurrent GRU (`critic.cell.*`/`critic.value_head.*`). The
-    # critic is discarded for analysis, so tolerate a critic mismatch and only
-    # require the actor (backbone/head) weights to load.
+    # The critic is discarded for analysis. Tolerate critic shape/key
+    # differences across MLP/recurrent and pre-`critic_type` checkpoints, but
+    # require the actor (backbone/head) weights to load cleanly.
     missing, unexpected = policy.load_state_dict(state, strict=False)
     non_critic_missing = [k for k in missing if not k.startswith("critic.")]
     non_critic_unexpected = [k for k in unexpected if not k.startswith("critic.")]

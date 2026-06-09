@@ -8,11 +8,15 @@ Actor backbone is selectable via `backbone=`:
 - ``"gru"`` — `GRUBackbone` consumes the full 6-D obs; its hidden state is the
   latent and the head consumes it directly (no re-concat).
 
-Critic: recurrent — a single `nn.GRUCell` over the full 6-D obs followed by a
-Linear value head. The critic is a separate parallel network (it does NOT share
-the actor backbone), so the same GRU critic is used regardless of the actor
-backbone, keeping connectome-vs-GRU comparisons fair. The critic is discarded at
-deployment; only the actor backbone is the "biological" model.
+Critic: selectable via `critic_type=`:
+
+- ``"mlp"`` — stateless 2-layer MLP over the full 6-D obs.
+- ``"recurrent"`` — a single `nn.GRUCell` over the full 6-D obs followed by a
+  Linear value head.
+
+The critic is a separate parallel network (it does NOT share the actor
+backbone). It is discarded at deployment; only the actor backbone is the
+"biological" model.
 
 Sequence operations follow the convention: tensors are `(T, B, D)` for both
 `obs_seq` and `mask_seq`; states are `(B, state_size)` carried across env steps
@@ -43,6 +47,23 @@ HEAD_EXTRA_INDICES = (2, 3, 4, 5)
 
 def _gather(obs: torch.Tensor, indices: tuple[int, ...]) -> torch.Tensor:
     return obs[..., list(indices)]
+
+
+def _normalize_hidden_sizes(hidden: int | str | Iterable[int]) -> tuple[int, ...]:
+    if isinstance(hidden, int):
+        return (int(hidden),)
+    if isinstance(hidden, str):
+        return tuple(int(part.strip()) for part in hidden.split(",") if part.strip())
+    return tuple(int(width) for width in hidden)
+
+
+def _normalize_critic_type(critic_type: str) -> str:
+    critic = str(critic_type).lower()
+    if critic in {"mlp", "stateless", "feedforward", "ff"}:
+        return "mlp"
+    if critic in {"recurrent", "gru", "rnn"}:
+        return "recurrent"
+    raise ValueError(f"Unknown critic_type {critic_type!r}; expected 'mlp' or 'recurrent'")
 
 
 def remap_legacy_backbone_keys(state: dict) -> dict:
@@ -95,6 +116,43 @@ class CriticGRU(nn.Module):
         return torch.stack(values, dim=0)
 
 
+class CriticMLP(nn.Sequential):
+    """Stateless value network: MLP over obs with the critic-state API shim.
+
+    The rest of PPO carries a critic state tensor so recurrent critics can train
+    through sequences. For the MLP critic this state is a one-column zero
+    placeholder and is intentionally ignored.
+    """
+
+    def __init__(self, obs_dim: int, hidden: Iterable[int]):
+        widths = _normalize_hidden_sizes(hidden)
+        layers: list[nn.Module] = []
+        in_dim = int(obs_dim)
+        for width in widths:
+            layers.extend([nn.Linear(in_dim, int(width)), nn.Tanh()])
+            in_dim = int(width)
+        layers.append(nn.Linear(in_dim, 1))
+        super().__init__(*layers)
+        self.state_size = 1
+
+    def initial_state(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        return torch.zeros(batch_size, self.state_size, device=device)
+
+    def forward_step(
+        self, obs: torch.Tensor, state: torch.Tensor, mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del mask
+        return self(obs), torch.zeros_like(state)
+
+    def forward_sequence(
+        self, obs_seq: torch.Tensor, state0: torch.Tensor, mask_seq: torch.Tensor
+    ) -> torch.Tensor:
+        del state0, mask_seq
+        steps, batch = obs_seq.shape[:2]
+        flat_obs = obs_seq.reshape(steps * batch, -1)
+        return self(flat_obs).reshape(steps, batch, 1)
+
+
 class Policy(nn.Module):
     def __init__(
         self,
@@ -102,7 +160,8 @@ class Policy(nn.Module):
         metadata_csv: str | Path | None = None,
         latent_dim: int = 32,
         message_passing_steps: int = 6,
-        critic_hidden: tuple[int, ...] = (64, 64),
+        critic_hidden: int | str | Iterable[int] = (64, 64),
+        critic_type: str = "recurrent",
         log_std_init: float = -0.5,
         backbone: str = "connectome",
         gru_hidden: int = 421,
@@ -131,11 +190,14 @@ class Policy(nn.Module):
         self.actor_mean = nn.Linear(head_in_dim, ACTION_DIM)
         self.actor_log_std = nn.Parameter(torch.full((ACTION_DIM,), float(log_std_init)))
 
-        # Recurrent critic: a separate GRU over the full obs. critic_hidden is a
-        # tuple for legacy MLP configs; the GRU uses its first entry as the
-        # hidden width (same param so existing configs need no change).
-        critic_gru_hidden = int(critic_hidden[0]) if critic_hidden else 64
-        self.critic = CriticGRU(obs_dim=OBS_DIM, hidden=critic_gru_hidden)
+        self.critic_type = _normalize_critic_type(critic_type)
+        critic_hidden = _normalize_hidden_sizes(critic_hidden)
+        if self.critic_type == "mlp":
+            self.critic = CriticMLP(obs_dim=OBS_DIM, hidden=critic_hidden)
+        else:
+            # Recurrent critic uses the first hidden width as its GRU state size.
+            critic_gru_hidden = int(critic_hidden[0]) if critic_hidden else 64
+            self.critic = CriticGRU(obs_dim=OBS_DIM, hidden=critic_gru_hidden)
 
         self.actor_state_size = self.backbone.state_size
         self.critic_state_size = self.critic.state_size
@@ -230,8 +292,6 @@ class Policy(nn.Module):
         log_prob = dist.log_prob(flat_actions).sum(dim=-1, keepdim=True)
         entropy = dist.entropy().sum(dim=-1, keepdim=True)
 
-        # Critic is recurrent: roll the GRU through the sequence from its stored
-        # initial hidden state, zeroing at episode boundaries via mask_seq.
         values = self.critic.forward_sequence(obs_seq, critic_state0, mask_seq)
 
         return (
