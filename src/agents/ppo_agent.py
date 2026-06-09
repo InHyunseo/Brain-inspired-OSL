@@ -317,6 +317,11 @@ class PPOTrainer:
         self._actor_state, self._critic_state = self.policy.initial_states(self.cfg.num_envs, self.device)
         self._mask = torch.zeros(self.cfg.num_envs, 1, device=self.device)
 
+    def set_noise_stage(self, stage: int, strength: float) -> None:
+        self.runner.set_noise_stage(stage, strength)
+        self.env_config["noise_stage"] = int(stage)
+        self.env_config["noise_strength"] = float(strength)
+
     def _evaluate(self, episodes: int) -> dict[str, float]:
         env = OslEnv({**self.env_config, "seed": self.cfg.seed + 10_000})
         returns = []
