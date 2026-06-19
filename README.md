@@ -1,5 +1,7 @@
 # OSL — Odor Source Localization with a Larva-Inspired RL Agent
 
+> 🥉 **3rd place — BME Graduation Project**
+
 A bio-inspired reinforcement-learning study of **odor source localization (OSL)**:
 reach an unseen odor source from local concentration alone, using two ideas
 borrowed from *Drosophila* larva chemotaxis —
